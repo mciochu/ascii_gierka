@@ -52,7 +52,9 @@ The production service is isolated from other applications:
 - Source checkout: `/home/ubuntu/services/ascii_gierka/repo`
 - Verified releases: `/home/ubuntu/services/ascii_gierka/releases/`
 - Active build: `/home/ubuntu/services/ascii_gierka/current`
-- HTTP port: `4175`
+- Public game URL: `http://57.128.245.116:4173/dominium/`
+- Public entry port: `4173` (shared with Karcianka using a dedicated `/dominium/` route)
+- Standalone diagnostic port: `4175` (may be filtered by the VPS provider firewall)
 - Watcher: checks public GitHub `main` every 60 seconds
 - Deployment: `npm ci`, `npm run verify`, then an atomic symlink switch
 - Autostart: per-user cron `@reboot` entry

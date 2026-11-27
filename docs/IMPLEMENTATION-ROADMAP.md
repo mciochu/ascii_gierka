@@ -22,15 +22,15 @@ Zakres: przestrzeń i fizyka mapy z sekcji 1 oraz podstawy geometrii potrzebne d
 - Przygotowanie siatki pod późniejsze fosy, mury, bramy i fizyczne zasoby.
 **Status: ukończony w zakresie fundamentu mapy; audyt techniczny PASS.** Nie oznacza to ukończenia całej sekcji 1 pierwotnego dokumentu — fizyczne magazyny są w etapie 4, a Lord i warunek porażki w etapie 5.
 
-### Etap 2 — kompletny HUD i klasyczne sterowanie
+### Etap 2 — HUD i klasyczne sterowanie (częściowa implementacja)
 Zakres: sekcje 2 i 3 specyfikacji.
 - Dolny HUD z sześcioma tarczami kategorii budowania oraz pełnym katalogiem budynków.
-- Środkowy panel kontekstowy dla budowy, budynków i grup jednostek.
+- Środkowy panel kontekstowy dla katalogu, zaznaczonych budynków i grup jednostek; dla istniejących miejsc pracy jest kontrola wstrzymania/wznowienia oraz zwolnienia pracowników do ogniska.
 - Skryba, księga raportów, minimapa, ranking, dyplomacja, opcje, Undo i burzenie.
 - Klasyczny schemat LPM: wybór i wydawanie rozkazów zależnie od kontekstu.
 - Portrety typów jednostek, rozkazy specjalne, menu gestów kamery, minimapa i zakładki kamery.
 - Skróty opisane w dokumencie, edge-scroll, flatten, zoom oraz pełne zachowanie pauzy.
-**Status: wdrożony w zakresie HUD i klasycznego sterowania.** Dostępne są obecne systemy prototypu; pozycje wymagające przyszłej ekonomii, fortyfikacji lub Lordów AI pozostają jawnie nieaktywne.
+**Status: częściowo wdrożony.** Gotowe są układ HUD, sześć kategorii i katalog 52 pozycji, panel kontekstowy prototypu, podstawowe sterowanie LPM/PPM, minimapa, kamera, zapis oraz postawy jednostek. Pełna zgodność z sekcjami 2–3 nie jest jeszcze osiągnięta: raport/ranking i dyplomacja są uproszczone, część skrótów nie ma jeszcze obiektu docelowego, a panele ekonomiczne i produkcyjne czekają na etapy 4–6.
 
 ### Etap 3 — mieszkańcy, populacja i popularność
 Zakres: sekcja 4 specyfikacji.
@@ -39,7 +39,7 @@ Zakres: sekcja 4 specyfikacji.
 - Pełny bilans racji i różnorodności, podatków/łapówek, piwa, religii i Fear Factor.
 - Rzeczywiste obiekty Dobrych i Złych Rzeczy, księża i wygasające błogosławieństwa.
 - Raport popularności „W nadchodzącym miesiącu” z rozbiciem wszystkich modyfikatorów.
-**Status: wdrożony w zakresie mieszkańców, zatrudniania i podstawowego bilansu popularności.** Dostawy beczek piwa oraz pełna wydajność łańcuchów produkcji pozostają zależne od etapu 4, a właściwy interfejs rekrutacji i pełne koszty oddziałów od etapu 5.
+**Status: wdrożony w zakresie populacji, zatrudniania, obsługi miejsc pracy i podstawowego bilansu popularności.** Dostawy beczek piwa oraz realna wydajność łańcuchów produkcji pozostają zależne od etapu 4, a właściwy interfejs rekrutacji i pełne koszty oddziałów od etapu 5.
 
 ### Etap 4 — magazyny, logistyka i łańcuchy produkcyjne
 Zakres: sekcja 5 specyfikacji oraz fizyczne zasoby z sekcji 1.
@@ -127,8 +127,8 @@ Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
 - src/ui/catalog.ts: katalog sześciu kategorii i 52 pozycji zgodnych z listą w specyfikacji. Jedyną pozycją aktywnej budowy jest istniejąca w prototypie Wieża strażnicza (70 drewna, 30 kamienia). Reszta jest widoczna, ale nieaktywna, dopóki nie powstaną jej mechaniki w etapach 4–5.
 - Panel kontekstowy pokazuje katalog, szczegóły zaznaczonego obiektu albo grupy jednostek. Jednostki są grupowane według typu, mają liczebność oraz trzy przyciski postaw: Utrzymać pozycję, Obronna, Agresywna. Dostępne są rozkazy Stop i Atak w ruchu.
 - Skryba prezentuje na żywo popularność (kolor i mimika), złoto oraz populację. Księga raportów pokazuje bieżącą prognozę bilansu popularności z rozbiciem modyfikatorów oraz armię pogrupowaną według typów.
-- Minimapę renderują wyłącznie znaki Unicode: uproszczone rodzaje terenu, budowle, oddziały własne i wrogie oraz ramka aktualnego widoku. Kliknięcie i przeciągnięcie przesuwa kamerę.
-- Przyciski Undo i burzenia działają dla wież wzniesionych w tej rozgrywce: cofnięcie zwraca 100% znanych kosztów, burzenie 50%. Startowe budynki nie są niszczone, ponieważ ich koszt nie jest zapisany w modelu. Ranking pokazuje dane gracza i aktualnego oddziału rozbójników; dyplomacja wyjaśnia brak sojuszników AI w obecnym prototypie.
+- Minimapę renderują wyłącznie znaki Unicode: uproszczone rodzaje terenu (w tym pola złóż), budowle, oddziały własne i wrogie, mieszkańcy oraz ramka aktualnego widoku. Kliknięcie i przeciągnięcie przesuwa kamerę.
+- Przyciski Undo i burzenia działają dla budynków wzniesionych w tej rozgrywce i mających zapisany koszt: cofnięcie zwraca 100%, burzenie 50%. Startowe budynki pozostają chronione, ponieważ ich koszt nie jest zapisany. Ranking pokazuje dane gracza i aktualnego oddziału rozbójników, a nie pełny ranking Lordów; dyplomacja jest ekranem informacyjnym bez sojuszników AI.
 - Opcje udostępniają zmianę prędkości, widok/ukrywanie HUD, ustawienie racji i podatków/łapówek oraz zapis i wczytanie stanu w localStorage przeglądarki (klucz dominium.save.v1, wersja formatu 1). Zapis obejmuje symulację, obiekty, rozkazy i postawy oddziałów, wieże, zaznaczenie, grupy kontrolne, historię Undo, ustawienia widoku i zakładki kamery. Wczytywanie waliduje strukturę oraz zakresy danych przed odtworzeniem świata.
 - Raporty rankingowe i dyplomatyczne nie udają jeszcze pełnej ekonomii lub Lordów AI. Wykresy ekonomiczne nie zostały dodane, bo właściwe magazyny i łańcuchy danych powstaną w etapie 4.
 
@@ -150,7 +150,7 @@ Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
 
 **Granice etapu 2 — świadomie pozostawione na później**
 - Pełne mechaniki 51 pozostałych pozycji katalogu: m.in. magazyny/produkcja/handel z etapu 4 oraz fortyfikacje, fosy i pozostałe budynki wojskowe z etapu 5.
-- Panele sterowania pracą każdego budynku, zakup/sprzedaż na targu i pełne ekrany ekonomii wymagają danych i mechanik etapów 4–5.
+- Przełącznik pracy jest dostępny dla obecnych budynków z miejscem pracy (młyn, budynki religijne i gospoda); pracownicy wracają trasą do ogniska, a po wznowieniu wolne miejsca są obsadzane. Szczegółowe sterowanie produkcją, zakupy/sprzedaż na targu i pełne ekrany ekonomii wymagają danych i mechanik etapów 4–6.
 - Prawdziwy ranking Lordów, rozkazy sojuszniczym botom i transfery zasobów wymagają systemu Lordów i AI z etapów 5–6.
 - Patrol, ostrzał punktu, rekrutacja i pełen zestaw rozkazów specjalnych zostają do etapu 5.
 - Zapis jest lokalny dla przeglądarki/originu; nie jest synchronizowany między urządzeniami.
@@ -189,6 +189,14 @@ Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
 - Naprawiono ścieżkę błędu dojścia do miejsca pracy: pracownik, dla którego nie da się wyznaczyć trasy, jest usuwany z listy obsady budynku i wraca do statusu bezrobotnego. Nie blokuje już miejsca pracy jako „duchowy” pracownik.
 - Dodano test regresyjny dla natychmiastowego opuszczenia mapy; pełny zestaw ma 50/50 PASS.
 - TypeScript, build i `git diff --check` PASS. Nadal nie wykonano ręcznego testu wizualnego w przeglądarce z powodu braku `libatk-1.0.so.0` w środowisku VPS.
+
+**Audyt porównawczy etapów 1–3 (2026-11-27)**
+
+- Etap 1: ponownie zweryfikowano wszystkie 10 000 środków pól, mapowanie komórka↔świat, spójność sieci pól przechodnich, zakaz ścinania narożników, teren i konwersję kamery w czterech obrotach. Nie znaleziono nowego błędu siatki. Kompas otrzymał kierunkową strzałkę, która obraca się wraz z mapą. Fosy, mury, Lord i fizyczne magazyny pozostają poza zakresem ukończonego fundamentu.
+- Etap 2: podwójne kliknięcie filtrowało oddziały według osiowego prostokąta świata, co po obrocie mogło włączać jednostki niewidoczne na ekranie. Teraz sprawdza rzeczywiste współrzędne ekranowe w aktualnym obrocie. Usunięto błędną sugestię, że `X` burzy budynek (X obraca mapę). Tryb budowy pokazuje zielony/czerwony podgląd pola dla obecnych aktywnych budowli, z walidacją terenu, kosztu i odstępu. Panel istniejącego budynku z miejscem pracy udostępnia przełącznik pracy; kontrolki pozostają zablokowane podczas pauzy. Skróty M/N/I/S nie mają jeszcze obiektów docelowych i nie są przedstawiane jako działające.
+- Etap 3: wstrzymanie miejsca pracy zwalnia pracowników, którzy fizycznie wracają do ogniska; po dotarciu mogą zostać przydzieleni do pierwszego aktywnego wolnego stanowiska. Wznowienie obsadza wolne miejsca, a zburzenie budynku także zwalnia personel. Stan `enabled` budynku i status powrotu są częścią zapisu.
+- Dodano testy regresyjne dla widoczności po obrocie, wstrzymywania/wznawiania miejsc pracy, zwalniania pracowników, podglądu budowania i interfejsu kompasu. Łącznie 57/57 testów, TypeScript, build i `git diff --check` PASS.
+- Ręczna weryfikacja obrazu strony w przeglądarce nadal nie jest wykonana z powodu braku `libatk-1.0.so.0` w środowisku VPS; test HTTP nie jest przedstawiany jako test wizualny.
 
 **Granice etapu 3 — świadomie pozostawione na później**
 - Dostawa, składowanie i fizyczne zużywanie beczek piwa wymagają Składu i logistyki z etapu 4. Gospoda jest budowalna i zatrudnia karczmarza, ale sama nie tworzy beczek.

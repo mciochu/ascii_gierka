@@ -304,3 +304,8 @@ button:disabled { opacity: .38; cursor: not-allowed !important; }
 .scribe-metrics em { color: #8bcf91; font: 5px var(--mono); font-style: normal; letter-spacing: .02em; }
 
 .mini-cell.villager { color: #80d688; font-weight: 700; opacity: 1; }
+
+.worksite-controls { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+.worksite-controls button { border: 1px solid #39464a; background: #0c1214; color: #c8d5d8; padding: 6px 8px; cursor: pointer; font: 7px var(--mono); }
+.worksite-controls button:hover:not(:disabled) { border-color: #b99a58; color: #f0d58e; }
+.map-compass b { transform-origin: center center; transition: transform .12s ease; }

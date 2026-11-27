@@ -4,7 +4,7 @@ export type TaxLevel = "bribe-generous" | "bribe-large" | "bribe-small" | "none"
 export type WorksiteKind = "production" | "religion" | "inn";
 export type ReligiousBuilding = "chapel" | "church" | "cathedral";
 export type FearObjectKind = "good" | "bad";
-export type VillagerStatus = "idle" | "walking-to-work" | "working" | "leaving";
+export type VillagerStatus = "idle" | "walking-to-work" | "working" | "returning-to-campfire" | "leaving";
 export type VillagerRole = "laborer" | "priest";
 
 export interface Villager {
@@ -30,6 +30,8 @@ export interface Worksite {
   kind: WorksiteKind;
   requiredWorkers: number;
   workerIds: string[];
+  /** False pauses this building and releases its workers back to the campfire. */
+  enabled?: boolean;
   x: number;
   y: number;
   buildingType?: ReligiousBuilding;
@@ -95,14 +97,15 @@ export const TAX_RULES: Record<TaxLevel, { label: string; popularity: number; go
   cruel: { label: "Okrutne podatki", popularity: -16, goldPerVillager: 1.8, bribe: 0 }
 };
 
-function idlePosition(index: number): { x: number; y: number } {
-  const angle = index * 2.399963229728653;
-  const radius = 24 + Math.sqrt(index) * 15;
+export function campfireIdlePosition(index: number): { x: number; y: number } {
+  const safeIndex = Math.max(0, Math.trunc(index));
+  const angle = safeIndex * 2.399963229728653;
+  const radius = 24 + Math.sqrt(safeIndex) * 15;
   return { x: CAMPFIRE.x + Math.cos(angle) * radius, y: CAMPFIRE.y + Math.sin(angle) * radius };
 }
 
 function makeVillager(id: string, index: number, x = CAMPFIRE.x, y = CAMPFIRE.y): Villager {
-  const idle = idlePosition(index);
+  const idle = campfireIdlePosition(index);
   return {
     id,
     x: x === CAMPFIRE.x && y === CAMPFIRE.y ? idle.x : x,
@@ -117,6 +120,7 @@ function makeVillager(id: string, index: number, x = CAMPFIRE.x, y = CAMPFIRE.y)
 export function assignAvailableWorkers(state: SimulationState): number {
   let assigned = 0;
   for (const site of state.worksites) {
+    if (site.enabled === false) continue;
     while (site.workerIds.length < site.requiredWorkers) {
       const villager = state.villagers.find((candidate) => candidate.status === "idle");
       if (!villager) break;
@@ -144,26 +148,48 @@ export function syncPopulationCounters(state: SimulationState): void {
 }
 
 export function addWorksite(state: SimulationState, site: Worksite): void {
-  state.worksites.push({ ...site, workerIds: [] });
+  state.worksites.push({ ...site, enabled: site.enabled !== false, workerIds: [] });
   assignAvailableWorkers(state);
+}
+
+function releaseWorksiteWorkers(state: SimulationState, worksiteId: string): void {
+  for (const villager of state.villagers) {
+    if (villager.worksiteId !== worksiteId) continue;
+    villager.worksiteId = undefined;
+    villager.role = "laborer";
+    villager.status = "returning-to-campfire";
+    villager.targetX = undefined;
+    villager.targetY = undefined;
+    villager.moveTarget = undefined;
+    villager.movementQueue = [];
+    villager.blessingTargetId = undefined;
+    villager.blessingReadyAt = undefined;
+  }
+}
+
+/** Pause/resume a staffed building. Released workers walk back to the campfire. */
+export function setWorksiteEnabled(state: SimulationState, worksiteId: string, enabled: boolean): boolean {
+  const site = state.worksites.find((candidate) => candidate.id === worksiteId);
+  if (!site || (site.enabled !== false) === enabled) return false;
+  site.enabled = enabled;
+  if (!enabled) {
+    releaseWorksiteWorkers(state, worksiteId);
+    site.workerIds = [];
+    assignAvailableWorkers(state);
+  } else {
+    assignAvailableWorkers(state);
+  }
+  syncPopulationCounters(state);
+  return true;
 }
 
 export function removeWorksite(state: SimulationState, worksiteId: string): void {
   const index = state.worksites.findIndex((site) => site.id === worksiteId);
   if (index < 0) return;
-  const [site] = state.worksites.splice(index, 1);
-  for (const villager of state.villagers) {
-    if (villager.worksiteId !== worksiteId) continue;
-    villager.worksiteId = undefined;
-    villager.role = "laborer";
-    villager.status = "idle";
-    villager.targetX = undefined;
-    villager.targetY = undefined;
-    villager.moveTarget = undefined;
-    villager.movementQueue = [];
-  }
-  if (site) site.workerIds = [];
+  state.worksites.splice(index, 1);
+  releaseWorksiteWorkers(state, worksiteId);
   assignAvailableWorkers(state);
+  syncPopulationCounters(state);
 }
 
 export function createSimulation(): SimulationState {
@@ -174,7 +200,7 @@ export function createSimulation(): SimulationState {
     ration: 1, tax: "none", bribeCostPerVillager: null, foodTypes: 1, taverns: 0, beerBarrels: 0,
     churches: 0, cathedrals: 0, blessedShare: 0, fear: 0,
     villagers: Array.from({ length: 8 }, (_, index) => makeVillager("villager-" + (index + 1), index)),
-    worksites: [{ id: "mill", kind: "production", requiredWorkers: 3, workerIds: [], x: 1455, y: 1100 }],
+    worksites: [{ id: "mill", kind: "production", requiredWorkers: 3, workerIds: [], enabled: true, x: 1455, y: 1100 }],
     fearObjects: [],
     spawnProgress: 0,
     elapsedSeconds: 0,
@@ -231,7 +257,7 @@ export function getFearDamageMultiplier(fear: number): number {
 
 export function activeInnCount(state: SimulationState): number {
   return state.worksites.filter((site) =>
-    site.kind === "inn" && site.workerIds.some((id) =>
+    site.kind === "inn" && site.enabled !== false && site.workerIds.some((id) =>
       state.villagers.some((villager) => villager.id === id && villager.status === "working")
     )
   ).length;
@@ -277,7 +303,7 @@ function startVillagerDeparture(state: SimulationState): boolean {
 
 function createNewVillager(state: SimulationState): Villager {
   const id = "villager-" + state.nextVillagerId++;
-  const position = idlePosition(state.villagers.length);
+  const position = campfireIdlePosition(state.villagers.length);
   const villager = makeVillager(id, state.villagers.length, position.x, position.y);
   state.villagers.push(villager);
   assignAvailableWorkers(state);

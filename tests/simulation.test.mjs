@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createSimulation, settleMonth, advanceSimulation, setGameSpeed, advancePopulation,
-  addWorksite, assignAvailableWorkers, recruitFromCampfire, setHovelCapacity,
+  addWorksite, assignAvailableWorkers, recruitFromCampfire, setHovelCapacity, setWorksiteEnabled, removeWorksite,
   calculateFearFactor, getFearWorkMultiplier, getFearDamageMultiplier,
   getPopularityModifiers, updateBlessedShare
 } from '../src/engine/simulation.ts';
@@ -164,6 +164,33 @@ test('bezrobotni automatycznie obsadzają pierwsze wolne miejsce pracy', () => {
   assert.equal(priest.role, 'priest');
   assert.equal(priest.status, 'walking-to-work');
   assert.equal(state.unemployed, 4);
+});
+
+test('wstrzymanie miejsca pracy zwalnia pracowników, a wznowienie obsadza je ponownie', () => {
+  const state = createSimulation();
+  const mill = state.worksites[0];
+  assert.equal(mill.workerIds.length, 3);
+  assert.equal(mill.enabled, true);
+  assert.equal(setWorksiteEnabled(state, 'mill', false), true);
+  assert.equal(mill.enabled, false);
+  assert.equal(mill.workerIds.length, 0);
+  assert.equal(state.villagers.filter((villager) => villager.status === 'returning-to-campfire').length, 3);
+  assert.equal(state.unemployed, 5); // workers count as idle only after reaching the campfire
+  assert.equal(assignAvailableWorkers(state), 0); // disabled buildings cannot take workers
+  assert.equal(setWorksiteEnabled(state, 'mill', false), false);
+  assert.equal(setWorksiteEnabled(state, 'mill', true), true);
+  assert.equal(mill.workerIds.length, 3);
+  assert.equal(state.villagers.filter((villager) => villager.worksiteId === 'mill').length, 3);
+  assert.equal(state.villagers.filter((villager) => villager.status === 'returning-to-campfire').length, 3);
+});
+
+test('zburzenie miejsca pracy zwalnia przypisanych mieszkańców do powrotu przy ognisku', () => {
+  const state = createSimulation();
+  assert.equal(removeWorksite(state, 'mill'), undefined);
+  assert.equal(state.worksites.length, 0);
+  assert.equal(state.villagers.filter((villager) => villager.status === 'returning-to-campfire').length, 3);
+  assert.equal(state.villagers.filter((villager) => villager.worksiteId === undefined && villager.status === 'returning-to-campfire').length, 3);
+  assert.equal(state.unemployed, 5);
 });
 
 test('rekrutacja zużywa jednego bezrobotnego, ale nie zmienia pojemności chat', () => {

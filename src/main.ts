@@ -8,6 +8,8 @@ import {
   assignAvailableWorkers,
   calculateFearFactor,
   CAMPFIRE,
+  campfireIdlePosition,
+  setWorksiteEnabled,
   BLESSING_DURATION_SECONDS,
   VILLAGER_MOVE_SPEED,
   getFearDamageMultiplier,
@@ -26,6 +28,7 @@ import {
   findGridPath,
   GRID_PIVOT,
   isBuildableAtWorld,
+  isWorldPointInViewport,
   viewportToWorld,
   worldPositionForCell,
   worldToCell,
@@ -34,6 +37,11 @@ import {
 
 type ToolMode = "select" | "attack-move" | "build" | "demolish";
 type CameraState = { x: number; y: number; zoom: number; rotation: number };
+const TOWN_BUILD_COSTS: Record<TownBuildingType, { wood: number; gold: number }> = {
+  hovel: { wood: 6, gold: 0 }, chapel: { wood: 0, gold: 250 },
+  church: { wood: 0, gold: 500 }, cathedral: { wood: 0, gold: 1000 },
+  inn: { wood: 20, gold: 100 }, good: { wood: 0, gold: 20 }, bad: { wood: 0, gold: 40 }
+};
 type SavedEntity = Omit<GameEntity, "group">;
 type PlacedStructureCost = {
   wood: number;
@@ -131,6 +139,13 @@ worldRoot.sortableChildren = true;
 app.stage.addChild(worldRoot);
 const world = createWorld(worldRoot);
 const entities = world.entities;
+let buildPreviewLayer = new Container();
+buildPreviewLayer.zIndex = 1000;
+buildPreviewLayer.visible = false;
+worldRoot.addChild(buildPreviewLayer);
+let buildPreviewRing: Text | null = null;
+let buildPreviewGlyph: Text | null = null;
+let lastBuildPreviewClient: { x: number; y: number } | null = null;
 
 let zoom = 0.62;
 let mapRotation = 0;
@@ -191,12 +206,75 @@ function selectedUnits(): GameEntity[] {
   return allSelected().filter((entity) => entity.kind === "unit" && entity.team === "player");
 }
 
+function canPlaceBuildPreview(itemId: string, point: { x: number; y: number }): boolean {
+  if (point.x < 40 || point.y < 40 || point.x > WORLD_SIZE.width - 40 || point.y > WORLD_SIZE.height - 40) return false;
+  if (!isBuildableAtWorld(world.grid, point)) return false;
+  if (itemId === "watchtower") {
+    if (simulation.wood < 70 || simulation.stone < 30) return false;
+    return !entities.some((entity) => Math.hypot(entity.x - point.x, entity.y - point.y) < (entity.kind === "building" ? 112 : 48));
+  }
+  const types: Record<string, TownBuildingType> = {
+    hovel: "hovel", chapel: "chapel", church: "church", cathedral: "cathedral", inn: "inn",
+    "good-things": "good", "bad-things": "bad"
+  };
+  const type = types[itemId];
+  if (!type) return false;
+  const cost = TOWN_BUILD_COSTS[type];
+  if (simulation.wood < cost.wood || simulation.gold < cost.gold) return false;
+  const clearance = type === "good" || type === "bad" ? 54 : 86;
+  return !entities.some((entity) => Math.hypot(entity.x - point.x, entity.y - point.y) < (entity.kind === "building" ? clearance : 48));
+}
+
+function updateBuildPreview(clientX: number, clientY: number): void {
+  if (mode !== "build" || !selectedBuildItemId) {
+    buildPreviewLayer.visible = false;
+    return;
+  }
+  lastBuildPreviewClient = { x: clientX, y: clientY };
+  const rect = viewport.getBoundingClientRect();
+  if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+    buildPreviewLayer.visible = false;
+    return;
+  }
+  const worldPoint = screenToWorld(clientX, clientY);
+  const tile = worldToCell(world.grid, worldPoint);
+  const point = tile ? worldPositionForCell(world.grid, tile.col, tile.row) : null;
+  if (!point) {
+    buildPreviewLayer.visible = false;
+    return;
+  }
+  const valid = canPlaceBuildPreview(selectedBuildItemId, point);
+  const item = findBuildItem(selectedBuildItemId);
+  const glyph = item?.glyph ?? "◇";
+  const color = valid ? "#65e08b" : "#ef6862";
+  if (!buildPreviewRing) {
+    buildPreviewRing = addGlyph(buildPreviewLayer, { char: "◇", x: point.x, y: point.y, size: 96, color, alpha: 0.76, weight: "bold", stroke: "#090d0d", strokeWidth: 1 });
+  } else {
+    buildPreviewRing.position.set(point.x, point.y);
+    buildPreviewRing.style.fill = color;
+    buildPreviewRing.alpha = 0.76;
+  }
+  if (!buildPreviewGlyph) {
+    buildPreviewGlyph = addGlyph(buildPreviewLayer, { char: glyph, x: point.x, y: point.y - 2, size: 42, color, alpha: 0.98, weight: "bold", stroke: "#090d0d", strokeWidth: 1 });
+  } else {
+    buildPreviewGlyph.text = glyph;
+    buildPreviewGlyph.position.set(point.x, point.y - 2);
+    buildPreviewGlyph.style.fill = color;
+    buildPreviewGlyph.alpha = 0.98;
+  }
+  buildPreviewLayer.visible = true;
+}
+
 function setMode(next: ToolMode): void {
   if (paused && next !== "select") {
     setStatus("Gra jest wstrzymana — nie można rozpoczynać budowania ani wydawać rozkazów.");
     next = "select";
   }
   mode = next;
+  buildPreviewLayer.visible = mode === "build";
+  if (mode === "build" && lastBuildPreviewClient) {
+    updateBuildPreview(lastBuildPreviewClient.x, lastBuildPreviewClient.y);
+  }
   demolishButton.classList.toggle("active", mode === "demolish");
   const labels: Record<ToolMode, string> = {
     select: "ZAZNACZANIE", "attack-move": "ATAK W RUCHU", build: "BUDOWANIE", demolish: "BURZENIE"
@@ -351,6 +429,7 @@ function updateVillagerVisuals(realDeltaSeconds: number): void {
     if (!activeIds.has(id)) { glyph.destroy(); villagerViews.delete(id); }
   }
 
+  let returnedToCampfire = false;
   for (const villager of simulation.villagers) {
     let glyph = villagerViews.get(villager.id);
     if (!glyph) {
@@ -380,12 +459,26 @@ function updateVillagerVisuals(realDeltaSeconds: number): void {
         syncPopulationCounters(simulation);
       }
     }
+    if (villager.status === "returning-to-campfire" && !villager.moveTarget && villager.movementQueue.length === 0) {
+      routeVillagerTo(villager, CAMPFIRE);
+    }
     if (villager.status === "leaving" && !villager.moveTarget && villager.movementQueue.length === 0) {
       routeVillagerOut(villager);
     }
-    if (gameDelta > 0 && (villager.status === "walking-to-work" || villager.status === "leaving")) {
+    if (gameDelta > 0 && (villager.status === "walking-to-work" || villager.status === "returning-to-campfire" || villager.status === "leaving")) {
       const arrived = advanceVillagerRoute(villager, gameDelta);
       if (arrived && villager.status === "leaving") villager.departed = true;
+      if (arrived && villager.status === "returning-to-campfire") {
+        const idlePosition = campfireIdlePosition(simulation.villagers.filter((candidate) => candidate.status === "idle").length);
+        villager.x = idlePosition.x;
+        villager.y = idlePosition.y;
+        villager.status = "idle";
+        villager.targetX = undefined;
+        villager.targetY = undefined;
+        villager.moveTarget = undefined;
+        villager.movementQueue = [];
+        returnedToCampfire = true;
+      }
       if (arrived && villager.status === "walking-to-work") {
         const site = simulation.worksites.find((candidate) => candidate.id === villager.worksiteId);
         if (site) {
@@ -399,6 +492,8 @@ function updateVillagerVisuals(realDeltaSeconds: number): void {
     }
     glyph.position.set(villager.x, villager.y);
   }
+
+  if (returnedToCampfire) assignAvailableWorkers(simulation);
 
   // Priests roam between residents. Blessings expire, so they revisit the least recently blessed people.
   for (const priest of simulation.villagers.filter((villager) => villager.role === "priest" && villager.status === "working")) {
@@ -486,6 +581,14 @@ function renderSelectionPanel(): void {
   } else {
     const entity = selection[0]!;
     const health = Math.max(0, Math.min(100, entity.health));
+    const worksite = entity.kind === "building"
+      ? simulation.worksites.find((site) => site.id === entity.id)
+      : undefined;
+    const worksiteMarkup = worksite
+      ? '<div class="worksite-controls"><div class="selection-meta">PRACOWNICY <b>' + worksite.workerIds.length + '/' + worksite.requiredWorkers +
+        ' · ' + (worksite.enabled === false ? 'WSTRZYMANO' : 'AKTYWNY') + '</b></div><button type="button" data-worksite-toggle="' + worksite.id + '"' +
+        (paused ? ' disabled' : '') + '>' + (worksite.enabled === false ? '▶ WZNÓW PRACĘ' : 'Ⅱ WSTRZYMAJ PRACĘ') + '</button></div>'
+      : '';
     contextContent.innerHTML =
       '<div class="selection-panel single-selection"><div class="selection-topline"><span>' +
       (entity.team === "enemy" ? "WROGI OBIEKT" : entity.kind === "unit" ? "ODDZIAŁ BOJOWY" : "BUDOWLA") +
@@ -494,6 +597,7 @@ function renderSelectionPanel(): void {
       '%;background:' + (entity.team === "enemy" ? "#e45b52" : "#78b8dd") +
       '"></span></div><div class="selection-meta">WYTRZYMAŁOŚĆ <b>' + Math.ceil(health) + '%</b></div>' +
       (entity.kind === "unit" ? '<div class="selection-meta">LICZEBNOŚĆ <b>' + (entity.count ?? 1) + '</b></div>' : '') +
+      worksiteMarkup +
       (entity.kind === "unit" && entity.team === "player" ?
         '<div class="stance-controls"><small>POSTAWA BOJOWA · ' + (entity.stance ?? "DOMYŚLNA").toUpperCase() +
         '</small><div><button type="button" data-stance="stand-ground">▣ UTRZYMAĆ POZYCJĘ</button>' +
@@ -513,6 +617,9 @@ function renderSelectionPanel(): void {
   contextContent.querySelectorAll<HTMLButtonElement>("[data-command]").forEach((button) => {
     button.addEventListener("click", () => runSelectionCommand(button.dataset.command ?? ""));
   });
+  contextContent.querySelectorAll<HTMLButtonElement>("[data-worksite-toggle]").forEach((button) => {
+    button.addEventListener("click", () => toggleWorksite(button.dataset.worksiteToggle ?? ""));
+  });
   contextContent.querySelectorAll<HTMLButtonElement>("[data-unit-type]").forEach((button) => {
     button.addEventListener("click", () => {
       const type = button.dataset.unitType ?? "";
@@ -526,6 +633,19 @@ function renderSelectionPanel(): void {
       setStatus("Usunięto typ " + type + " z zaznaczenia.");
     });
   });
+}
+
+function toggleWorksite(worksiteId: string): void {
+  if (paused) { setStatus("Gra jest wstrzymana — nie można zmieniać pracy budynku."); return; }
+  const site = simulation.worksites.find((candidate) => candidate.id === worksiteId);
+  if (!site) return;
+  const resume = site.enabled === false;
+  if (!setWorksiteEnabled(simulation, worksiteId, resume)) return;
+  updateVillagerVisuals(0);
+  updateSelection();
+  setStatus(resume
+    ? "Wznowiono pracę budynku. Wolni chłopi zostaną przydzieleni automatycznie."
+    : "Wstrzymano pracę budynku. Pracownicy wracają do ogniska.");
 }
 
 function updateSelection(): void {
@@ -649,13 +769,18 @@ function selectClickedEntity(entity: GameEntity, additive: boolean, toggle: bool
   if (entity.kind === "unit" && entity.team === "player") {
     const now = performance.now();
     if (lastClick?.id === entity.id && now - lastClick.at < 360) {
-      const bounds = visibleWorldBounds();
+      const camera = {
+        position: { x: worldRoot.position.x, y: worldRoot.position.y },
+        pivot: MAP_PIVOT,
+        zoom,
+        quarterTurns: mapRotation
+      };
+      const viewportSize = { width: viewport.clientWidth, height: viewport.clientHeight };
       const sameType = entities.filter((candidate) =>
         candidate.kind === "unit" &&
         candidate.team === "player" &&
         candidate.unitClass === entity.unitClass &&
-        candidate.x >= bounds.left && candidate.x <= bounds.right &&
-        candidate.y >= bounds.top && candidate.y <= bounds.bottom
+        isWorldPointInViewport(candidate, camera, viewportSize)
       );
       replaceSelection(sameType);
       setStatus(`Wybrano wszystkie widoczne oddziały typu: ${entity.unitClass ?? entity.name}.`);
@@ -867,16 +992,7 @@ function placeTownBuilding(itemId: string, x: number, y: number): void {
   };
   const type = types[itemId];
   if (!type) { setStatus("Ta budowla nie jest jeszcze dostępna."); return; }
-  const costs: Record<TownBuildingType, { wood: number; gold: number }> = {
-    hovel: { wood: 6, gold: 0 },
-    chapel: { wood: 0, gold: 250 },
-    church: { wood: 0, gold: 500 },
-    cathedral: { wood: 0, gold: 1000 },
-    inn: { wood: 20, gold: 100 },
-    good: { wood: 0, gold: 20 },
-    bad: { wood: 0, gold: 40 }
-  };
-  const cost = costs[type];
+  const cost = TOWN_BUILD_COSTS[type];
   if (simulation.wood < cost.wood || simulation.gold < cost.gold) {
     setStatus("Brakuje surowców: " + (cost.wood ? cost.wood + " drewna " : "") + (cost.gold ? cost.gold + " złota" : "") + ".");
     return;
@@ -1096,6 +1212,7 @@ canvas.addEventListener("pointerdown", (event: PointerEvent) => {
 
 canvas.addEventListener("pointermove", (event: PointerEvent) => {
   edgePointer = { x: event.clientX, y: event.clientY };
+  updateBuildPreview(event.clientX, event.clientY);
   if (!pointerSession || pointerSession.pointerId !== event.pointerId) return;
   const dx = event.clientX - pointerSession.lastX;
   const dy = event.clientY - pointerSession.lastY;
@@ -1119,6 +1236,9 @@ canvas.addEventListener("pointermove", (event: PointerEvent) => {
   }
   pointerSession.lastX = event.clientX;
   pointerSession.lastY = event.clientY;
+});
+canvas.addEventListener("pointerleave", () => {
+  if (!pointerSession) buildPreviewLayer.visible = false;
 });
 
 function finishPointer(event: PointerEvent): void {
@@ -1222,8 +1342,14 @@ function zoomAt(nextZoom: number, clientX?: number, clientY?: number): void {
   zoomLabel.textContent = String(Math.round(zoom * 100)) + "%";
 }
 
+function updateCompass(): void {
+  const arrow = document.querySelector<HTMLElement>(".map-compass b");
+  if (arrow) arrow.style.transform = "rotate(" + (mapRotation * 90) + "deg)";
+}
+
 function centerCamera(): void {
   zoom = 0.62;
+  updateCompass();
   worldRoot.pivot.set(MAP_PIVOT.x, MAP_PIVOT.y);
   worldRoot.rotation = mapRotation * Math.PI / 2;
   worldRoot.scale.set(zoom);
@@ -1235,6 +1361,7 @@ function centerCamera(): void {
 function rotateMap(direction: 1 | -1): void {
   mapRotation = (mapRotation + direction + 4) % 4;
   worldRoot.rotation = mapRotation * Math.PI / 2;
+  updateCompass();
   const label = document.querySelector<HTMLElement>("#rotation-label");
   if (label) label.textContent = String(mapRotation * 90) + "°";
   setStatus("Obrót mapy: " + (mapRotation * 90) + "°. Siatka i teren pozostają wyrównane z obiektami.");
@@ -1598,6 +1725,7 @@ function togglePause(): void {
     button.classList.toggle("paused", paused);
   }
   if (paused) setMode("select");
+  updateSelection();
   setStatus(paused ? "Symulacja zatrzymana. Kamera i minimapa pozostają aktywne." : "Symulacja wznowiona.");
 }
 document.querySelector<HTMLButtonElement>("#pause-button")?.addEventListener("click", togglePause);
@@ -1628,6 +1756,7 @@ function restoreCamera(bookmark: { x: number; y: number; zoom: number; rotation:
   worldRoot.rotation = mapRotation * Math.PI / 2;
   worldRoot.scale.set(zoom);
   worldRoot.position.set(bookmark.x, bookmark.y);
+  updateCompass();
   zoomLabel.textContent = Math.round(zoom * 100) + "%";
   const label = document.querySelector<HTMLElement>("#rotation-label");
   if (label) label.textContent = mapRotation * 90 + "°";
@@ -1745,7 +1874,7 @@ function loadGame(): void {
     if (savedSimulation.villagers.length > 200 || !savedSimulation.villagers.every((entry) =>
       isRecord(entry) && typeof entry.id === "string" && typeof entry.x === "number" && Number.isFinite(entry.x) &&
       typeof entry.y === "number" && Number.isFinite(entry.y) &&
-      ["idle", "walking-to-work", "working", "leaving"].includes(String(entry.status)) &&
+      ["idle", "walking-to-work", "working", "returning-to-campfire", "leaving"].includes(String(entry.status)) &&
       ["laborer", "priest"].includes(String(entry.role)) && typeof entry.blessedUntil === "number" &&
       Array.isArray(entry.movementQueue))) {
       closeDialog(); setStatus("Zapis zawiera nieprawidłową listę mieszkańców."); return;
@@ -1753,7 +1882,8 @@ function loadGame(): void {
   }
   if (Array.isArray(savedSimulation.worksites) && !savedSimulation.worksites.every((entry) =>
     isRecord(entry) && typeof entry.id === "string" && typeof entry.x === "number" && typeof entry.y === "number" &&
-    typeof entry.requiredWorkers === "number" && Array.isArray(entry.workerIds))) {
+    typeof entry.requiredWorkers === "number" && Array.isArray(entry.workerIds) &&
+    (entry.enabled === undefined || typeof entry.enabled === "boolean"))) {
     closeDialog(); setStatus("Zapis zawiera nieprawidłowe miejsca pracy."); return;
   }
   if (Array.isArray(savedSimulation.fearObjects) && !savedSimulation.fearObjects.every((entry) =>
@@ -1767,6 +1897,13 @@ function loadGame(): void {
   villagerViews.clear();
   for (const child of worldRoot.removeChildren()) child.destroy({ children: true });
   const freshWorld = createWorld(worldRoot);
+  buildPreviewLayer = new Container();
+  buildPreviewLayer.zIndex = 1000;
+  worldRoot.addChild(buildPreviewLayer);
+  buildPreviewRing = null;
+  buildPreviewGlyph = null;
+  buildPreviewLayer.visible = false;
+  lastBuildPreviewClient = null;
   world.layers = freshWorld.layers;
   world.grid = freshWorld.grid;
   world.setFlattened = freshWorld.setFlattened;

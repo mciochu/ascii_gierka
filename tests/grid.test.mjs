@@ -5,6 +5,7 @@ import {
   findGridPath,
   GRID_PIVOT,
   isBuildableAtWorld,
+  isWorldPointInViewport,
   isWalkableAtWorld,
   rotateOffset,
   tileAt,
@@ -192,6 +193,24 @@ test('obszary lasu, oazy i złóż mają osiągalne pola z centrum mapy', () => 
     assert.ok(point);
     const route = findGridPath(grid, { x: 1190, y: 915 }, point);
     assert.ok(route, 'teren poza zasięgiem trasy: ' + type);
+  }
+});
+
+test('wybór jednostek rozpoznaje faktyczny prostokąt ekranu we wszystkich obrotach', () => {
+  const camera = {
+    position: { x: 320, y: 240 },
+    pivot: GRID_PIVOT,
+    zoom: 0.62,
+    quarterTurns: 0
+  };
+  for (let quarterTurns = 0; quarterTurns < 4; quarterTurns += 1) {
+    camera.quarterTurns = quarterTurns;
+    const center = viewportToWorld({ x: 320, y: 240 }, camera);
+    const outsideLeft = viewportToWorld({ x: -1, y: 240 }, camera);
+    const outsideBottom = viewportToWorld({ x: 320, y: 481 }, camera);
+    assert.equal(isWorldPointInViewport(center, camera, { width: 640, height: 480 }), true);
+    assert.equal(isWorldPointInViewport(outsideLeft, camera, { width: 640, height: 480 }), false);
+    assert.equal(isWorldPointInViewport(outsideBottom, camera, { width: 640, height: 480 }), false);
   }
 });
 

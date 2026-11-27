@@ -325,3 +325,13 @@ export function viewportToWorld(point: WorldPoint, camera: MapCameraTransform): 
   }, -camera.quarterTurns);
   return { x: camera.pivot.x + offset.x, y: camera.pivot.y + offset.y };
 }
+
+/** True only when a world point lands inside the actual screen rectangle. */
+export function isWorldPointInViewport(
+  point: WorldPoint,
+  camera: MapCameraTransform,
+  viewport: { width: number; height: number }
+): boolean {
+  const screen = worldToViewport(point, camera);
+  return screen.x >= 0 && screen.y >= 0 && screen.x <= viewport.width && screen.y <= viewport.height;
+}

@@ -104,3 +104,34 @@ test("zapis obejmuje mieszkańców, miejsca pracy, obiekty strachu i nowe budowl
   assert.match(main, /savedSimulation\.worksites/);
   assert.match(main, /savedSimulation\.fearObjects/);
 });
+
+test("panel budynku pozwala wstrzymać i wznowić pracę oraz odsyła mieszkańców do ogniska", () => {
+  assert.match(main, /data-worksite-toggle/);
+  assert.match(main, /function toggleWorksite\(/);
+  assert.match(main, /setWorksiteEnabled\(simulation, worksiteId, resume\)/);
+  assert.match(main, /status === "returning-to-campfire"/);
+  assert.match(main, /routeVillagerTo\(villager, CAMPFIRE\)/);
+  assert.match(main, /if \(returnedToCampfire\) assignAvailableWorkers\(simulation\)/);
+});
+
+test("interfejs nie przypisuje klawisza X do burzenia, a kompas obraca się z mapą", () => {
+  assert.doesNotMatch(html, /Burzenie \(X\)/);
+  assert.match(html, /class="map-compass"[\s\S]*?<b>↑<\/b>/);
+  assert.match(main, /function updateCompass\(\)[\s\S]*?map-compass b[\s\S]*?style\.transform/);
+  assert.match(main, /updateCompass\(\);[\s\S]*?function rotateMap/);
+});
+
+test("dwuklik wybiera oddziały tego samego typu tylko wewnątrz viewportu", () => {
+  assert.match(main, /isWorldPointInViewport\(candidate, camera, viewportSize\)/);
+  assert.doesNotMatch(main, /candidate\.x >= bounds\.left && candidate\.x <= bounds\.right/);
+});
+
+
+test("tryb budowania pokazuje zielony lub czerwony podgląd pola przed postawieniem budowli", () => {
+  assert.match(main, /function canPlaceBuildPreview\(/);
+  assert.match(main, /function updateBuildPreview\(/);
+  assert.match(main, /const color = valid \? "#65e08b" : "#ef6862"/);
+  assert.match(main, /canvas\.addEventListener\("pointermove", \(event: PointerEvent\) => \{[\s\S]*?updateBuildPreview\(event\.clientX, event\.clientY\)/);
+  assert.match(main, /buildPreviewLayer\.visible = mode === "build"/);
+  assert.match(main, /const cost = TOWN_BUILD_COSTS\[type\]/);
+});

@@ -3,18 +3,32 @@ import "./style.css";
 import { addGlyph } from "./engine/glyph";
 import { createWatchtower, createWorld, WORLD_SIZE, type GameEntity } from "./engine/world";
 
-type Mode = "select" | "move" | "build";
+type ToolMode = "select" | "attack-move" | "build";
+type PointerSession = {
+  pointerId: number;
+  kind: "select" | "pan";
+  startX: number;
+  startY: number;
+  lastX: number;
+  lastY: number;
+  moved: boolean;
+  additive: boolean;
+  toggle: boolean;
+};
 
-const viewport = document.querySelector<HTMLDivElement>("#map-viewport")!;
-const statusMessage = document.querySelector<HTMLElement>("#status-message")!;
-const modeLabel = document.querySelector<HTMLElement>("#mode-label")!;
-const mapHint = document.querySelector<HTMLElement>("#map-hint")!;
-const zoomLabel = document.querySelector<HTMLElement>("#zoom-label")!;
-const selectionContent = document.querySelector<HTMLElement>("#selection-content")!;
-const inspector = document.querySelector<HTMLElement>(".inspector")!;
+const viewport = document.querySelector<HTMLDivElement>("#map-viewport");
+const statusMessage = document.querySelector<HTMLElement>("#status-message");
+const zoomLabel = document.querySelector<HTMLElement>("#zoom-label");
+const modeLabel = document.querySelector<HTMLElement>("#mode-label");
+const mapHint = document.querySelector<HTMLElement>("#map-hint");
+const selectedCountLabel = document.querySelector<HTMLElement>("#selected-count");
+const selectionContent = document.querySelector<HTMLElement>("#selection-content");
+const selectionRect = document.querySelector<HTMLDivElement>("#selection-rect");
+const inspector = document.querySelector<HTMLElement>(".inspector");
 
-if (!viewport || !statusMessage || !modeLabel || !mapHint || !zoomLabel || !selectionContent || !inspector) {
-  throw new Error("Game interface is missing required elements.");
+if (!viewport || !statusMessage || !zoomLabel || !modeLabel || !mapHint ||
+    !selectedCountLabel || !selectionContent || !selectionRect || !inspector) {
+  throw new Error("DOMINIUM game interface is incomplete.");
 }
 
 const goldValue = document.querySelector<HTMLElement>("#gold-value");
@@ -24,7 +38,7 @@ const stoneValue = document.querySelector<HTMLElement>("#stone-value");
 
 const app = new Application();
 await app.init({
-  background: "#18271e",
+  background: "#000000",
   resizeTo: viewport,
   antialias: true,
   autoDensity: true,
@@ -33,12 +47,13 @@ await app.init({
 });
 
 const canvas = app.canvas;
-canvas.setAttribute("aria-label", "Mapa królestwa DOMINIUM");
+canvas.setAttribute("aria-label", "Mapa świata DOMINIUM");
 canvas.style.position = "absolute";
 canvas.style.inset = "0";
 canvas.style.width = "100%";
 canvas.style.height = "100%";
-viewport.insertBefore(canvas, viewport.firstChild);
+canvas.style.zIndex = "0";
+viewport.prepend(canvas);
 
 const worldRoot = new Container();
 worldRoot.sortableChildren = true;
@@ -46,43 +61,52 @@ app.stage.addChild(worldRoot);
 const world = createWorld(worldRoot);
 const entities = world.entities;
 
-let zoom = 0.68;
-let mode: Mode = "select";
-let selectedEntity: GameEntity | null = null;
-let selectionGlyph: Text | null = null;
-let buildType: "watchtower" | null = null;
-let towerCounter = 0;
+let zoom = 0.62;
+let mode: ToolMode = "select";
 let paused = false;
 let gold = 1240;
 let food = 860;
 let wood = 340;
 let stone = 210;
-let dragState: { pointerId: number; x: number; y: number } | null = null;
+let towerCounter = 0;
+let pointerSession: PointerSession | null = null;
+let lastClick: { id: string; at: number } | null = null;
+const selectedIds = new Set<string>();
+const selectionMarkers = new Map<string, Text>();
+const controlGroups = new Map<number, string[]>();
 const keysDown = new Set<string>();
 
 function setStatus(message: string): void {
   statusMessage.textContent = message;
 }
 
-function setMode(nextMode: Mode): void {
-  mode = nextMode;
+function allSelected(): GameEntity[] {
+  return entities.filter((entity) => selectedIds.has(entity.id));
+}
+
+function selectedUnits(): GameEntity[] {
+  return allSelected().filter((entity) => entity.kind === "unit" && entity.team === "player");
+}
+
+function setMode(next: ToolMode): void {
+  mode = next;
   document.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((button) => {
     button.classList.toggle("active", button.dataset.mode === mode);
   });
 
-  const labels: Record<Mode, string> = {
-    select: "TRYB: ZAZNACZANIE",
-    move: "TRYB: WYDAWANIE ROZKAZÓW",
-    build: "TRYB: BUDOWA"
+  const labels: Record<ToolMode, string> = {
+    select: "ZAZNACZANIE",
+    "attack-move": "ATAK W RUCHU",
+    build: "BUDOWANIE"
   };
-  const hints: Record<Mode, string> = {
-    select: "WYBIERZ ODDZIAŁ LUB BUDYNEK",
-    move: "WSKAŻ MIEJSCE DOCELOWE NA MAPIE",
+  const hints: Record<ToolMode, string> = {
+    select: "PRZECIĄGNIJ MYSZĄ, ABY ZAZNACZYĆ ODDZIAŁY",
+    "attack-move": "WSKAŻ CEL ATAKU NA MAPIE",
     build: "WSKAŻ MIEJSCE POD WIEŻĘ STRAŻNICZĄ"
   };
-  modeLabel.textContent = labels[mode];
-  mapHint.textContent = hints[mode];
-  canvas.style.cursor = mode === "select" ? "crosshair" : mode === "move" ? "alias" : "copy";
+  modeLabel.textContent = labels[mode] ?? labels.select;
+  mapHint.textContent = hints[mode] ?? hints.select;
+  canvas.style.cursor = mode === "select" ? "default" : mode === "attack-move" ? "crosshair" : "copy";
 }
 
 function setResources(): void {
@@ -92,63 +116,107 @@ function setResources(): void {
   if (stoneValue) stoneValue.textContent = stone.toLocaleString("pl-PL");
 }
 
-function updateSelectionPanel(entity: GameEntity | null): void {
-  if (!entity) {
+function redrawSelectionMarkers(): void {
+  for (const marker of selectionMarkers.values()) marker.destroy();
+  selectionMarkers.clear();
+  world.layers.effects.removeChildren();
+
+  for (const entity of allSelected()) {
+    const marker = addGlyph(world.layers.effects, {
+      char: entity.kind === "unit" ? "◎" : "⌜",
+      x: entity.x,
+      y: entity.y,
+      size: entity.kind === "unit" ? 43 : 102,
+      color: entity.team === "enemy" ? "#ff625d" : "#71caff",
+      alpha: 0.94,
+      weight: "bold",
+      stroke: "#000000",
+      strokeWidth: 2
+    });
+    selectionMarkers.set(entity.id, marker);
+  }
+}
+
+function renderSelectionPanel(): void {
+  const selection = allSelected();
+  const units = selection.filter((entity) => entity.kind === "unit");
+  const buildings = selection.filter((entity) => entity.kind === "building");
+  selectedCountLabel.textContent = String(selection.length);
+
+  if (selection.length === 0) {
     selectionContent.innerHTML = `
       <div class="empty-selection">
-        <span>⌖</span>
-        <b>Nie wybrano obiektu</b>
-        <p>Zaznacz oddział lub budynek na mapie, aby wyświetlić szczegóły i dostępne rozkazy.</p>
+        <span class="empty-glyph">⌖</span>
+        <b>Nic nie zaznaczono</b>
+        <p>Przeciągnij lewym przyciskiem myszy po mapie, aby zaznaczyć wiele własnych oddziałów. Pojedyncze budynki wybierzesz kliknięciem.</p>
       </div>`;
     return;
   }
 
-  const health = Math.max(0, Math.min(100, entity.health));
-  const strength = entity.kind === "unit" ? `<div class="object-meta"><span>STAN ODDZIAŁU</span><span>${entity.count ?? 0} ŻOŁNIERZY</span></div>` : "";
-  const moveButton = entity.kind === "unit"
-    ? '<button class="command-button" id="issue-move" type="button">➤ &nbsp; WYDAJ ROZKAZ MARSZU</button>'
-    : '<div class="object-meta"><span>STATUS</span><span>OBIEKT SOJUSZNICZY</span></div>';
+  if (selection.length > 1) {
+    const totalSoldiers = units.reduce((sum, unit) => sum + (unit.count ?? 1), 0);
+    const types = [...new Set(units.map((unit) => unit.unitClass ?? unit.role))];
+    const health = Math.round(selection.reduce((sum, entity) => sum + entity.health, 0) / selection.length);
+    selectionContent.innerHTML = `
+      <div class="group-selection">
+        <div class="selection-topline"><span>GRUPA BOJOWA</span><strong>${selection.length} OBIEKTY</strong></div>
+        <h2>Wybrane oddziały</h2>
+        <p>${units.length} oddziały · ${totalSoldiers} żołnierzy${buildings.length ? ` · ${buildings.length} budynki` : ""}</p>
+        <div class="selection-health"><span style="width:${health}%"></span></div>
+        <div class="selection-meta"><span>ŚREDNI STAN</span><b>${health}%</b></div>
+        <div class="unit-type-list">${types.map((type) => `<span>${type}</span>`).join("")}</div>
+        <div class="selection-actions">
+          <button type="button" data-command="stop">■ STOP</button>
+          <button type="button" data-command="hold">▣ OBRONA</button>
+          <button type="button" data-command="attack-move">⚔ ATAK</button>
+        </div>
+      </div>`;
+  } else {
+    const entity = selection[0]!;
+    const health = Math.max(0, Math.min(100, entity.health));
+    selectionContent.innerHTML = `
+      <div class="single-selection">
+        <div class="selection-topline"><span>${entity.team === "enemy" ? "WROGI OBIEKT" : entity.kind === "unit" ? "ODDZIAŁ BOJOWY" : "BUDOWLA"}</span><strong>${entity.role}</strong></div>
+        <h2>${entity.name}</h2>
+        <p>${entity.description}</p>
+        <div class="selection-health"><span style="width:${health}%;background:${entity.team === "enemy" ? "#e45b52" : "#78b8dd"}"></span></div>
+        <div class="selection-meta"><span>WYTRZYMAŁOŚĆ</span><b>${Math.ceil(health)}%</b></div>
+        ${entity.kind === "unit" ? `<div class="selection-meta"><span>LICZEBNOŚĆ</span><b>${entity.count ?? 1}</b></div>` : ""}
+        ${entity.kind === "unit" && entity.team === "player" ? `
+          <div class="selection-actions">
+            <button type="button" data-command="stop">■ STOP</button>
+            <button type="button" data-command="hold">▣ OBRONA</button>
+            <button type="button" data-command="attack-move">⚔ ATAK</button>
+          </div>` : ""}
+      </div>`;
+  }
 
-  selectionContent.innerHTML = `
-    <div class="selected-object">
-      <div class="object-type">${entity.role}</div>
-      <h2>${entity.name}</h2>
-      <p>${entity.description}</p>
-      <div class="object-health"><span style="width:${health}%"></span></div>
-      <div class="object-meta"><span>WYTRZYMAŁOŚĆ</span><span>${health}%</span></div>
-      ${strength}
-      ${moveButton}
-    </div>`;
-
-  document.querySelector<HTMLButtonElement>("#issue-move")?.addEventListener("click", () => {
-    setMode("move");
-    setStatus(`Rozkaz dla oddziału: ${entity.name}. Wskaż miejsce docelowe.`);
+  selectionContent.querySelectorAll<HTMLButtonElement>("[data-command]").forEach((button) => {
+    button.addEventListener("click", () => runSelectionCommand(button.dataset.command ?? ""));
   });
 }
 
-function selectEntity(entity: GameEntity | null): void {
-  selectedEntity = entity;
-  world.layers.effects.removeChildren();
-  selectionGlyph = null;
+function updateSelection(): void {
+  redrawSelectionMarkers();
+  renderSelectionPanel();
+  inspector.classList.toggle("has-selection", selectedIds.size > 0);
+}
 
-  if (entity) {
-    selectionGlyph = addGlyph(world.layers.effects, {
-      char: "◎",
-      x: entity.x,
-      y: entity.y,
-      size: 48,
-      color: "#e5cb89",
-      alpha: 0.95,
-      weight: "bold",
-      stroke: "#253329",
-      strokeWidth: 1
-    });
-    updateSelectionPanel(entity);
-    setStatus(`Wybrano: ${entity.name}.`);
-    inspector.classList.add("open");
-  } else {
-    updateSelectionPanel(null);
-  }
+function replaceSelection(items: GameEntity[]): void {
+  selectedIds.clear();
+  for (const entity of items) selectedIds.add(entity.id);
+  updateSelection();
+}
+
+function clearSelection(): void {
+  selectedIds.clear();
+  updateSelection();
+}
+
+function toggleSelection(entity: GameEntity): void {
+  if (selectedIds.has(entity.id)) selectedIds.delete(entity.id);
+  else selectedIds.add(entity.id);
+  updateSelection();
 }
 
 function screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
@@ -163,11 +231,10 @@ function findEntityAt(x: number, y: number): GameEntity | null {
   let nearest: GameEntity | null = null;
   let nearestDistance = Infinity;
   for (const entity of entities) {
-    const dx = entity.x - x;
-    const dy = entity.y - y;
-    const distance = Math.hypot(dx, dy);
-    const radius = entity.kind === "building" ? 83 : 62;
-    if (distance < radius && distance < nearestDistance) {
+    if (entity.health <= 0) continue;
+    const distance = Math.hypot(entity.x - x, entity.y - y);
+    const radius = entity.kind === "building" ? 76 : 43;
+    if (distance <= radius && distance < nearestDistance) {
       nearest = entity;
       nearestDistance = distance;
     }
@@ -175,13 +242,203 @@ function findEntityAt(x: number, y: number): GameEntity | null {
   return nearest;
 }
 
+function visibleWorldBounds(): { left: number; top: number; right: number; bottom: number } {
+  const topLeft = screenToWorld(viewport.getBoundingClientRect().left, viewport.getBoundingClientRect().top);
+  const bottomRight = screenToWorld(viewport.getBoundingClientRect().right, viewport.getBoundingClientRect().bottom);
+  return {
+    left: Math.min(topLeft.x, bottomRight.x),
+    top: Math.min(topLeft.y, bottomRight.y),
+    right: Math.max(topLeft.x, bottomRight.x),
+    bottom: Math.max(topLeft.y, bottomRight.y)
+  };
+}
+
+function selectBox(rect: { left: number; top: number; right: number; bottom: number }, additive: boolean, toggle: boolean): void {
+  const box = {
+    left: Math.min(rect.left, rect.right),
+    right: Math.max(rect.left, rect.right),
+    top: Math.min(rect.top, rect.bottom),
+    bottom: Math.max(rect.top, rect.bottom)
+  };
+  const hits = entities.filter((entity) =>
+    entity.kind === "unit" &&
+    entity.team === "player" &&
+    entity.health > 0 &&
+    entity.x >= box.left && entity.x <= box.right &&
+    entity.y >= box.top && entity.y <= box.bottom
+  );
+
+  if (!additive && !toggle) selectedIds.clear();
+  for (const entity of hits) {
+    if (toggle && selectedIds.has(entity.id)) selectedIds.delete(entity.id);
+    else selectedIds.add(entity.id);
+  }
+  updateSelection();
+  setStatus(hits.length
+    ? `Zaznaczono ${hits.length} oddziałów. Kliknij prawym przyciskiem, aby wydać rozkaz.`
+    : additive || toggle ? "Nie znaleziono kolejnych oddziałów w zaznaczonym obszarze." : "Pusty obszar — zaznaczenie wyczyszczone.");
+}
+
+function selectClickedEntity(entity: GameEntity, additive: boolean, toggle: boolean): void {
+  if (toggle) {
+    toggleSelection(entity);
+  } else if (additive) {
+    selectedIds.add(entity.id);
+    updateSelection();
+  } else {
+    replaceSelection([entity]);
+  }
+
+  if (entity.kind === "unit" && entity.team === "player") {
+    const now = performance.now();
+    if (lastClick?.id === entity.id && now - lastClick.at < 360) {
+      const bounds = visibleWorldBounds();
+      const sameType = entities.filter((candidate) =>
+        candidate.kind === "unit" &&
+        candidate.team === "player" &&
+        candidate.unitClass === entity.unitClass &&
+        candidate.x >= bounds.left && candidate.x <= bounds.right &&
+        candidate.y >= bounds.top && candidate.y <= bounds.bottom
+      );
+      replaceSelection(sameType);
+      setStatus(`Wybrano wszystkie widoczne oddziały typu: ${entity.unitClass ?? entity.name}.`);
+      lastClick = null;
+      return;
+    }
+    lastClick = { id: entity.id, at: now };
+  } else {
+    lastClick = null;
+  }
+  setStatus(`Wybrano: ${entity.name}.`);
+}
+
+function setMoveOrder(unit: GameEntity, x: number, y: number, queued: boolean): void {
+  unit.attackTargetId = undefined;
+  unit.attackMoveTarget = undefined;
+  unit.holdPosition = false;
+  const target = {
+    x: Math.max(28, Math.min(WORLD_SIZE.width - 28, x)),
+    y: Math.max(28, Math.min(WORLD_SIZE.height - 28, y))
+  };
+  if (queued) {
+    unit.movementQueue ??= [];
+    unit.movementQueue.push(target);
+    if (!unit.moveTarget) unit.moveTarget = unit.movementQueue.shift();
+  } else {
+    unit.movementQueue = [];
+    unit.moveTarget = target;
+  }
+}
+
+function issueFormationOrder(x: number, y: number, queued: boolean): void {
+  const units = selectedUnits();
+  if (units.length === 0) {
+    setStatus("Najpierw zaznacz własne oddziały.");
+    return;
+  }
+
+  const columns = Math.ceil(Math.sqrt(units.length));
+  const rows = Math.ceil(units.length / columns);
+  const spacing = units.length > 12 ? 66 : 54;
+  units.forEach((unit, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const offsetX = (column - (columns - 1) / 2) * spacing;
+    const offsetY = (row - (rows - 1) / 2) * spacing;
+    setMoveOrder(unit, x + offsetX, y + offsetY, queued);
+  });
+  setStatus(queued
+    ? `Dodano rozkaz do kolejki dla ${units.length} oddziałów.`
+    : `Rozkaz marszu: ${units.length} oddziałów rusza w szyku.`);
+}
+
+function issueAttackOrder(target: GameEntity): void {
+  const units = selectedUnits();
+  if (units.length === 0) {
+    setStatus("Zaznacz własne oddziały, aby wydać rozkaz ataku.");
+    return;
+  }
+  for (const unit of units) {
+    unit.attackTargetId = target.id;
+    unit.attackMoveTarget = undefined;
+    unit.moveTarget = undefined;
+    unit.movementQueue = [];
+    unit.holdPosition = false;
+  }
+  setStatus(`Rozkaz ataku: ${units.length} oddziałów atakuje ${target.name}.`);
+}
+
+function issueAttackMove(x: number, y: number): void {
+  const units = selectedUnits();
+  if (units.length === 0) {
+    setStatus("Najpierw zaznacz własne oddziały.");
+    setMode("select");
+    return;
+  }
+  const columns = Math.ceil(Math.sqrt(units.length));
+  const rows = Math.ceil(units.length / columns);
+  units.forEach((unit, index) => {
+    const offsetX = (index % columns - (columns - 1) / 2) * 54;
+    const offsetY = (Math.floor(index / columns) - (rows - 1) / 2) * 54;
+    unit.attackTargetId = undefined;
+    unit.holdPosition = false;
+    unit.movementQueue = [];
+    unit.attackMoveTarget = { x: x + offsetX, y: y + offsetY };
+    unit.moveTarget = { ...unit.attackMoveTarget };
+  });
+  setStatus("Oddziały ruszają z rozkazem ataku w ruchu.");
+  setMode("select");
+}
+
+function stopUnits(): void {
+  for (const unit of selectedUnits()) {
+    unit.moveTarget = undefined;
+    unit.attackMoveTarget = undefined;
+    unit.attackTargetId = undefined;
+    unit.movementQueue = [];
+    unit.holdPosition = false;
+  }
+  setStatus("Rozkaz STOP: oddziały zatrzymały się.");
+}
+
+function holdUnits(): void {
+  for (const unit of selectedUnits()) {
+    unit.moveTarget = undefined;
+    unit.attackMoveTarget = undefined;
+    unit.attackTargetId = undefined;
+    unit.movementQueue = [];
+    unit.holdPosition = true;
+  }
+  setStatus("Rozkaz OBRONA: oddziały utrzymują pozycję.");
+}
+
+function runSelectionCommand(command: string): void {
+  if (command === "stop") stopUnits();
+  else if (command === "hold") holdUnits();
+  else if (command === "attack-move") setMode("attack-move");
+}
+
+function handleContextCommand(clientX: number, clientY: number, queued: boolean): void {
+  const point = screenToWorld(clientX, clientY);
+  const target = findEntityAt(point.x, point.y);
+  if (target?.team === "enemy") {
+    issueAttackOrder(target);
+    return;
+  }
+  issueFormationOrder(point.x, point.y, queued);
+}
+
 function placeWatchtower(x: number, y: number): void {
   if (wood < 70 || stone < 30) {
-    setStatus("Brakuje surowców. Wieża wymaga 70 drewna i 30 kamienia.");
+    setStatus("Brakuje surowców: wieża wymaga 70 drewna i 30 kamienia.");
     return;
   }
   if (x < 40 || y < 40 || x > WORLD_SIZE.width - 40 || y > WORLD_SIZE.height - 40) {
-    setStatus("Nie można budować poza granicami posiadłości.");
+    setStatus("Nie można budować poza granicami mapy.");
+    return;
+  }
+  if (entities.some((entity) => Math.hypot(entity.x - x, entity.y - y) < (entity.kind === "building" ? 112 : 48))) {
+    setStatus("To miejsce jest zajęte. Wybierz wolny teren.");
     return;
   }
 
@@ -191,79 +448,121 @@ function placeWatchtower(x: number, y: number): void {
   const tower = createWatchtower(world.layers.structures, x, y, towerCounter);
   entities.push(tower);
   setResources();
-  buildType = null;
+  replaceSelection([tower]);
   setMode("select");
-  selectEntity(tower);
-  setStatus("Wieża strażnicza wzniesiona. Nowy posterunek czuwa nad okolicą.");
+  setStatus("Wieża strażnicza wzniesiona.");
 }
 
-function handleMapClick(event: PointerEvent): void {
-  if (event.button !== 0 || dragState) return;
-  const point = screenToWorld(event.clientX, event.clientY);
-
-  if (mode === "build" && buildType === "watchtower") {
+function handleLeftClick(clientX: number, clientY: number, additive: boolean, toggle: boolean): void {
+  const point = screenToWorld(clientX, clientY);
+  if (mode === "build") {
     placeWatchtower(point.x, point.y);
     return;
   }
-
-  if (mode === "move") {
-    if (!selectedEntity || selectedEntity.kind !== "unit") {
-      setStatus("Najpierw wybierz oddział, któremu chcesz wydać rozkaz.");
-      setMode("select");
-      return;
-    }
-    selectedEntity.moveTarget = {
-      x: Math.max(25, Math.min(WORLD_SIZE.width - 25, point.x)),
-      y: Math.max(25, Math.min(WORLD_SIZE.height - 25, point.y))
-    };
-    setStatus(`Rozkaz marszu: ${selectedEntity.name} rusza do wyznaczonego punktu.`);
-    setMode("select");
+  if (mode === "attack-move") {
+    issueAttackMove(point.x, point.y);
     return;
   }
-
   const entity = findEntityAt(point.x, point.y);
   if (entity) {
-    selectEntity(entity);
-  } else {
-    selectEntity(null);
-    inspector.classList.remove("open");
-    setStatus("Nie wybrano obiektu. Mapa pozostaje pod twoją kontrolą.");
+    selectClickedEntity(entity, additive, toggle);
+  } else if (!additive && !toggle) {
+    clearSelection();
+    setStatus("Zaznaczenie wyczyszczone.");
   }
+}
+
+function updateSelectionRectangle(clientX: number, clientY: number): void {
+  if (!pointerSession) return;
+  const bounds = viewport.getBoundingClientRect();
+  const left = Math.min(pointerSession.startX, clientX);
+  const top = Math.min(pointerSession.startY, clientY);
+  const right = Math.max(pointerSession.startX, clientX);
+  const bottom = Math.max(pointerSession.startY, clientY);
+  selectionRect.style.display = "block";
+  selectionRect.style.left = `${left - bounds.left}px`;
+  selectionRect.style.top = `${top - bounds.top}px`;
+  selectionRect.style.width = `${right - left}px`;
+  selectionRect.style.height = `${bottom - top}px`;
+}
+
+function hideSelectionRectangle(): void {
+  selectionRect.style.display = "none";
 }
 
 canvas.addEventListener("pointerdown", (event: PointerEvent) => {
-  const wantsPan = event.button === 1 || event.button === 2 || keysDown.has(" ");
-  if (wantsPan) {
-    dragState = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
-    canvas.setPointerCapture(event.pointerId);
-    canvas.style.cursor = "grabbing";
+  if (event.button === 2) {
     event.preventDefault();
     return;
   }
-  handleMapClick(event);
+  if (event.button !== 0 && event.button !== 1) return;
+
+  const pan = event.button === 1 || (event.button === 0 && keysDown.has(" "));
+  pointerSession = {
+    pointerId: event.pointerId,
+    kind: pan ? "pan" : "select",
+    startX: event.clientX,
+    startY: event.clientY,
+    lastX: event.clientX,
+    lastY: event.clientY,
+    moved: false,
+    additive: event.shiftKey,
+    toggle: event.ctrlKey || event.metaKey
+  };
+  canvas.setPointerCapture(event.pointerId);
+  if (pan) canvas.style.cursor = "grabbing";
+  event.preventDefault();
 });
 
 canvas.addEventListener("pointermove", (event: PointerEvent) => {
-  if (!dragState || dragState.pointerId !== event.pointerId) return;
-  const dx = event.clientX - dragState.x;
-  const dy = event.clientY - dragState.y;
-  worldRoot.position.x += dx;
-  worldRoot.position.y += dy;
-  dragState.x = event.clientX;
-  dragState.y = event.clientY;
+  if (!pointerSession || pointerSession.pointerId !== event.pointerId) return;
+  const dx = event.clientX - pointerSession.lastX;
+  const dy = event.clientY - pointerSession.lastY;
+  const totalDistance = Math.hypot(event.clientX - pointerSession.startX, event.clientY - pointerSession.startY);
+
+  if (pointerSession.kind === "pan") {
+    worldRoot.position.x += dx;
+    worldRoot.position.y += dy;
+    pointerSession.moved = totalDistance > 2;
+  } else if (mode === "select" && totalDistance > 5) {
+    pointerSession.moved = true;
+    updateSelectionRectangle(event.clientX, event.clientY);
+  }
+  pointerSession.lastX = event.clientX;
+  pointerSession.lastY = event.clientY;
 });
 
-function endDrag(event: PointerEvent): void {
-  if (!dragState || dragState.pointerId !== event.pointerId) return;
-  dragState = null;
-  canvas.style.cursor = mode === "select" ? "crosshair" : mode === "move" ? "alias" : "copy";
+function finishPointer(event: PointerEvent): void {
+  if (!pointerSession || pointerSession.pointerId !== event.pointerId) return;
+  const session = pointerSession;
+  pointerSession = null;
+  hideSelectionRectangle();
+
+  if (session.kind === "pan") {
+    canvas.style.cursor = mode === "select" ? "default" : mode === "attack-move" ? "crosshair" : "copy";
+    return;
+  }
+  if (session.moved && mode === "select") {
+    const start = screenToWorld(session.startX, session.startY);
+    const end = screenToWorld(event.clientX, event.clientY);
+    selectBox(
+      { left: start.x, top: start.y, right: end.x, bottom: end.y },
+      session.additive,
+      session.toggle
+    );
+  } else {
+    handleLeftClick(event.clientX, event.clientY, session.additive, session.toggle);
+  }
 }
-canvas.addEventListener("pointerup", endDrag);
-canvas.addEventListener("pointercancel", endDrag);
+canvas.addEventListener("pointerup", finishPointer);
+canvas.addEventListener("pointercancel", finishPointer);
+canvas.addEventListener("pointerup", (event: PointerEvent) => {
+  if (event.button === 2) handleContextCommand(event.clientX, event.clientY, event.shiftKey);
+});
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
 function zoomAt(nextZoom: number, clientX?: number, clientY?: number): void {
-  const clamped = Math.max(0.34, Math.min(1.55, nextZoom));
+  const clamped = Math.max(0.28, Math.min(1.7, nextZoom));
   if (Math.abs(clamped - zoom) < 0.001) return;
   const rect = canvas.getBoundingClientRect();
   const px = clientX === undefined ? rect.width / 2 : clientX - rect.left;
@@ -277,60 +576,82 @@ function zoomAt(nextZoom: number, clientX?: number, clientY?: number): void {
 }
 
 function centerCamera(): void {
-  const focusX = 1190;
-  const focusY = 915;
+  zoom = 0.62;
+  worldRoot.scale.set(zoom);
   worldRoot.position.set(
-    viewport.clientWidth / 2 - focusX * zoom,
-    viewport.clientHeight / 2 - focusY * zoom
+    viewport.clientWidth / 2 - 1190 * zoom,
+    viewport.clientHeight / 2 - 915 * zoom
   );
+  zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+}
+
+function saveControlGroup(number: number): void {
+  const units = selectedUnits();
+  if (units.length === 0) return;
+  controlGroups.set(number, units.map((unit) => unit.id));
+  setStatus(`Zapisano grupę ${number}: ${units.length} oddziałów. Użyj klawisza ${number}, aby ją wybrać.`);
+}
+
+function selectControlGroup(number: number): void {
+  const ids = controlGroups.get(number);
+  if (!ids) return;
+  const group = entities.filter((entity) => ids.includes(entity.id) && entity.health > 0);
+  replaceSelection(group);
+  setStatus(`Wybrano grupę ${number}: ${group.length} obiektów.`);
 }
 
 document.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((button) => {
   button.addEventListener("click", () => {
-    const next = button.dataset.mode as Mode;
-    if (next === "build") {
-      buildType = "watchtower";
-      setStatus("Wybierz wieżę strażniczą i wskaż miejsce na mapie.");
-    }
-    if (next === "move") setStatus("Wybierz oddział i wskaż jego cel.");
-    setMode(next);
+    const nextMode = button.dataset.mode as ToolMode;
+    if (nextMode === "build") setStatus("Wybierz miejsce pod wieżę strażniczą.");
+    if (nextMode === "attack-move") setStatus("Wskaż cel. Oddziały zaatakują napotkanych wrogów po drodze.");
+    setMode(nextMode);
   });
 });
 
 document.querySelector<HTMLButtonElement>("#build-tower")?.addEventListener("click", () => {
-  buildType = "watchtower";
   setMode("build");
-  setStatus("Budowa wieży: wskaż miejsce na mapie. Koszt: 70 drewna i 30 kamienia.");
+  setStatus("Budowa wieży: kliknij wolne miejsce na mapie. Koszt: 70 drewna i 30 kamienia.");
 });
 document.querySelector<HTMLButtonElement>("#zoom-in")?.addEventListener("click", () => zoomAt(zoom * 1.18));
 document.querySelector<HTMLButtonElement>("#zoom-out")?.addEventListener("click", () => zoomAt(zoom / 1.18));
 document.querySelector<HTMLButtonElement>("#reset-camera")?.addEventListener("click", centerCamera);
-document.querySelector<HTMLButtonElement>("#pause-button")?.addEventListener("click", (event) => {
+document.querySelector<HTMLButtonElement>("#pause-button")?.addEventListener("click", () => {
   paused = !paused;
-  const button = event.currentTarget as HTMLButtonElement;
-  button.innerHTML = paused ? "<span>▶</span><small>WZNÓW</small>" : "<span>Ⅱ</span><small>PAUZA</small>";
-  if (paused) app.ticker.stop();
-  else app.ticker.start();
+  const button = document.querySelector<HTMLButtonElement>("#pause-button");
+  if (button) {
+    button.innerHTML = paused ? "<span>▶</span><small>WZNÓW</small>" : "<span>Ⅱ</span><small>PAUZA</small>";
+    button.classList.toggle("paused", paused);
+  }
   setStatus(paused ? "Symulacja zatrzymana." : "Symulacja wznowiona.");
 });
 document.querySelector<HTMLButtonElement>("#help-button")?.addEventListener("click", () => {
-  setStatus("Sterowanie: przeciągnij prawym przyciskiem, aby przesunąć mapę; rolka myszy przybliża; V wybiera, M wydaje rozkaz ruchu, B buduje.");
+  setStatus("LPM: zaznacz / przeciągnij prostokąt. Shift: dodaj, Ctrl: przełącz. PPM: ruch lub atak. Środkowy przycisk: przesuwanie mapy. A: atak w ruchu, S: stop, H: obrona, Ctrl+1–9: grupy.");
 });
 
 window.addEventListener("keydown", (event) => {
   const target = event.target;
   if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
   const key = event.key.toLowerCase();
-  keysDown.add(key);
-  if (key === "v") setMode("select");
-  if (key === "m") setMode("move");
-  if (key === "b") {
-    buildType = "watchtower";
-    setMode("build");
+  if (event.ctrlKey && /^[1-9]$/.test(event.key)) {
+    saveControlGroup(Number(event.key));
+    event.preventDefault();
+    return;
   }
-  if (key === "escape") {
-    buildType = null;
-    setMode("select");
+  if (!event.ctrlKey && !event.metaKey && /^[1-9]$/.test(event.key)) {
+    selectControlGroup(Number(event.key));
+    return;
+  }
+  keysDown.add(key);
+  if (key === "a") setMode("attack-move");
+  if (key === "s") stopUnits();
+  if (key === "h") holdUnits();
+  if (key === "b") setMode("build");
+  if (key === "escape") setMode("select");
+  if (key === " " && target === document.body) {
+    paused = !paused;
+    const pauseButton = document.querySelector<HTMLButtonElement>("#pause-button");
+    if (pauseButton) pauseButton.innerHTML = paused ? "<span>▶</span><small>WZNÓW</small>" : "<span>Ⅱ</span><small>PAUZA</small>";
   }
   if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) event.preventDefault();
 });
@@ -342,47 +663,107 @@ canvas.addEventListener("wheel", (event) => {
   zoomAt(zoom * (event.deltaY < 0 ? 1.1 : 0.91), event.clientX, event.clientY);
 }, { passive: false });
 
-app.ticker.add((ticker) => {
-  if (paused) return;
+function findTarget(id: string | undefined): GameEntity | undefined {
+  return id ? entities.find((entity) => entity.id === id && entity.health > 0) : undefined;
+}
 
-  for (const entity of entities) {
-    if (!entity.moveTarget) continue;
-    const dx = entity.moveTarget.x - entity.x;
-    const dy = entity.moveTarget.y - entity.y;
-    const distance = Math.hypot(dx, dy);
-    if (distance < 3) {
-      entity.x = entity.moveTarget.x;
-      entity.y = entity.moveTarget.y;
-      entity.moveTarget = undefined;
-    } else {
-      const step = Math.min(1, ticker.deltaTime * 0.035);
-      entity.x += dx * step;
-      entity.y += dy * step;
+function moveUnit(unit: GameEntity, deltaSeconds: number): void {
+  if (!unit.moveTarget) return;
+  const dx = unit.moveTarget.x - unit.x;
+  const dy = unit.moveTarget.y - unit.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= 3) {
+    unit.x = unit.moveTarget.x;
+    unit.y = unit.moveTarget.y;
+    unit.moveTarget = unit.movementQueue?.shift();
+    if (!unit.moveTarget && unit.attackMoveTarget) {
+      unit.attackMoveTarget = undefined;
     }
-    entity.group.position.set(entity.x, entity.y);
-    if (selectedEntity === entity && selectionGlyph) {
-      selectionGlyph.position.set(entity.x, entity.y);
+  } else {
+    const speed = unit.moveSpeed ?? 92;
+    const step = Math.min(distance, speed * deltaSeconds);
+    unit.x += (dx / distance) * step;
+    unit.y += (dy / distance) * step;
+    unit.group.rotation = Math.atan2(dy, dx) * 0.08;
+  }
+  unit.group.position.set(unit.x, unit.y);
+  const marker = selectionMarkers.get(unit.id);
+  if (marker) marker.position.set(unit.x, unit.y);
+}
+
+function updateCombat(deltaSeconds: number): void {
+  const defeated: GameEntity[] = [];
+  for (const unit of entities) {
+    if (unit.kind !== "unit" || unit.holdPosition) continue;
+
+    if (unit.attackMoveTarget && !unit.attackTargetId) {
+      const nearestEnemy = entities
+        .filter((candidate) => candidate.team !== unit.team && candidate.health > 0)
+        .map((candidate) => ({ candidate, distance: Math.hypot(candidate.x - unit.x, candidate.y - unit.y) }))
+        .filter((entry) => entry.distance < 180)
+        .sort((a, b) => a.distance - b.distance)[0]?.candidate;
+      if (nearestEnemy) {
+        unit.attackTargetId = nearestEnemy.id;
+        unit.moveTarget = undefined;
+      }
+    }
+
+    const target = findTarget(unit.attackTargetId);
+    if (!target) {
+      unit.attackTargetId = undefined;
+      continue;
+    }
+
+    const dx = target.x - unit.x;
+    const dy = target.y - unit.y;
+    const distance = Math.hypot(dx, dy);
+    const range = unit.attackRange ?? 52;
+    if (distance > range) {
+      unit.moveTarget = {
+        x: target.x - (dx / Math.max(distance, 1)) * (range * 0.65),
+        y: target.y - (dy / Math.max(distance, 1)) * (range * 0.65)
+      };
+    } else {
+      unit.moveTarget = undefined;
+      unit.attackCooldown = Math.max(0, (unit.attackCooldown ?? 0) - deltaSeconds);
+      if (unit.attackCooldown === 0) {
+        target.health -= unit.attackDamage ?? 9;
+        unit.attackCooldown = 0.85;
+        if (target.health <= 0) defeated.push(target);
+      }
     }
   }
 
-  // A restrained breathing motion keeps the living world from feeling like a static terminal.
-  const seconds = performance.now() / 1000;
-  world.layers.actors.alpha = 0.97 + Math.sin(seconds * 1.7) * 0.025;
-});
-
-const panSpeed = 5;
-function panWithKeyboard(): void {
-  if (keysDown.has("a") || keysDown.has("arrowleft")) worldRoot.position.x += panSpeed;
-  if (keysDown.has("d") || keysDown.has("arrowright")) worldRoot.position.x -= panSpeed;
-  if (keysDown.has("w") || keysDown.has("arrowup")) worldRoot.position.y += panSpeed;
-  if (keysDown.has("s") || keysDown.has("arrowdown")) worldRoot.position.y -= panSpeed;
+  for (const entity of new Set(defeated)) {
+    const index = entities.findIndex((candidate) => candidate.id === entity.id);
+    if (index >= 0) entities.splice(index, 1);
+    selectedIds.delete(entity.id);
+    entity.group.destroy({ children: true });
+    setStatus(`${entity.name} został zniszczony.`);
+  }
+  if (defeated.length > 0) updateSelection();
 }
-app.ticker.add(() => {
-  if (!paused) panWithKeyboard();
+
+function panCamera(deltaSeconds: number): void {
+  const speed = 520 * deltaSeconds;
+  if (keysDown.has("arrowleft")) worldRoot.position.x += speed;
+  if (keysDown.has("arrowright")) worldRoot.position.x -= speed;
+  if (keysDown.has("arrowup")) worldRoot.position.y += speed;
+  if (keysDown.has("arrowdown")) worldRoot.position.y -= speed;
+}
+
+app.ticker.add((ticker) => {
+  if (paused) return;
+  const deltaSeconds = Math.min(ticker.deltaMS / 1000, 0.05);
+  panCamera(deltaSeconds);
+  updateCombat(deltaSeconds);
+  for (const entity of entities) {
+    if (entity.kind === "unit") moveUnit(entity, deltaSeconds);
+  }
 });
 
 setMode("select");
 setResources();
 centerCamera();
+updateSelection();
 window.addEventListener("resize", centerCamera);
-setStatus("Witaj, namiestniku. Twoje ziemie czekają na rozkazy.");

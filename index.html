@@ -3,74 +3,100 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#111a16" />
-    <meta name="description" content="DOMINIUM — średniowieczna strategia RTS zbudowana wyłącznie ze znaków Unicode." />
-    <title>DOMINIUM — ASCII RTS</title>
+    <meta name="theme-color" content="#000000" />
+    <meta name="description" content="DOMINIUM — średniowieczna strategia czasu rzeczywistego zbudowana wyłącznie ze znaków Unicode." />
+    <title>DOMINIUM — Chronicles of the Crown</title>
   </head>
   <body>
     <div id="app">
       <header class="topbar">
-        <a class="brand" href="/" aria-label="DOMINIUM">
+        <a class="brand" href="/dominium/" aria-label="DOMINIUM">
           <span class="brand-mark">Æ</span>
           <span class="brand-copy"><strong>DOMINIUM</strong><small>CHRONICLES OF THE CROWN</small></span>
         </a>
-        <div class="realm-label"><span class="live-dot"></span><span>POGRANICZE PÓŁNOCNE</span><b>ROK 1204</b></div>
-        <div class="resources" aria-label="Zasoby">
+        <div class="realm-label"><i></i><span>POGRANICZE PÓŁNOCNE</span><b>ROK 1204</b></div>
+        <div class="resources" aria-label="Zasoby królestwa">
           <div class="resource"><span class="resource-symbol gold">◈</span><span><b id="gold-value">1 240</b><small>ZŁOTO</small></span></div>
           <div class="resource"><span class="resource-symbol food">❧</span><span><b id="food-value">860</b><small>ŻYWNOŚĆ</small></span></div>
           <div class="resource"><span class="resource-symbol wood">♧</span><span><b id="wood-value">340</b><small>DREWNO</small></span></div>
           <div class="resource"><span class="resource-symbol stone">◩</span><span><b id="stone-value">210</b><small>KAMIEŃ</small></span></div>
         </div>
-        <button class="speed-button" id="pause-button" type="button" aria-label="Pauza symulacji"><span>Ⅱ</span><small>PAUZA</small></button>
+        <button class="speed-button" id="pause-button" type="button"><span>Ⅱ</span><small>PAUZA</small></button>
       </header>
 
       <main class="game-layout">
-        <nav class="tool-rail" aria-label="Narzędzia">
+        <nav class="tool-rail" aria-label="Dowodzenie">
           <div class="rail-section-label">DOWÓDZTWO</div>
-          <button class="tool-button active" data-mode="select" type="button" title="Zaznacz (V)"><span>⌖</span><small>WYBIERZ</small></button>
-          <button class="tool-button" data-mode="move" type="button" title="Ruch (M)"><span>➤</span><small>RUCH</small></button>
-          <button class="tool-button" data-mode="build" type="button" title="Budowa (B)"><span>⌂</span><small>BUDUJ</small></button>
+          <button class="tool-button active" data-mode="select" type="button" title="Zaznaczanie (V)"><span>⌖</span><small>WYBIERZ</small></button>
+          <button class="tool-button" data-mode="attack-move" type="button" title="Atak w ruchu (A)"><span>⚔</span><small>ATAK</small></button>
+          <button class="tool-button" data-mode="build" type="button" title="Budowanie (B)"><span>⌂</span><small>BUDUJ</small></button>
           <div class="rail-divider"></div>
-          <div class="rail-hint">W S<br>PRZESUŃ</div>
+          <div class="rail-hint">LPM<br>WYBIERZ<br><br>PPM<br>ROZKAZ</div>
           <div class="rail-spacer"></div>
-          <div class="connection-state"><span></span><small>LOKALNA<br>SYMULACJA</small></div>
+          <div class="connection-state"><span></span><small>SYMULACJA<br>LOKALNA</small></div>
         </nav>
 
-        <section class="map-column" aria-label="Mapa królestwa">
+        <section class="map-column" aria-label="Pole bitwy">
           <div class="map-toolbar">
-            <div class="map-location"><span>⌖</span><div><b>CASTELLUM</b><small>Twoje ziemie · Dolina rzeki</small></div></div>
-            <div class="map-tools"><span id="mode-label">TRYB: ZAZNACZANIE</span><button id="zoom-out" type="button" aria-label="Oddal">−</button><button id="zoom-in" type="button" aria-label="Przybliż">+</button><button id="reset-camera" type="button" aria-label="Wyśrodkuj mapę">◎</button></div>
+            <div class="map-location"><span>⌖</span><div><b>CASTELLUM</b><small>Twoje ziemie · Dolina Starej Rzeki</small></div></div>
+            <div class="map-tools">
+              <span id="mode-label">ZAZNACZANIE</span>
+              <button id="zoom-out" type="button" aria-label="Oddal mapę">−</button>
+              <button id="zoom-in" type="button" aria-label="Przybliż mapę">+</button>
+              <button id="reset-camera" type="button" aria-label="Wyśrodkuj mapę">◎</button>
+            </div>
           </div>
           <div id="map-viewport">
-            <div class="map-coordinates"><span>MAPA KRÓLESTWA</span><span id="zoom-label">75%</span></div>
+            <div class="map-coordinates"><span>SEKTOR 04 · DOLINA</span><b id="zoom-label">62%</b></div>
             <div class="map-compass"><span>N</span><b>✣</b></div>
-            <div class="map-hint" id="map-hint">WYBIERZ ODDZIAŁ LUB BUDYNEK</div>
+            <div id="selection-rect" aria-hidden="true"></div>
+            <div class="map-hint" id="map-hint">PRZECIĄGNIJ MYSZĄ, ABY ZAZNACZYĆ ODDZIAŁY</div>
             <div class="map-scale"><span></span><small>200 m</small></div>
             <div class="map-vignette"></div>
           </div>
-          <div class="map-statusbar"><span id="status-message">Witaj, namiestniku. Twoje ziemie czekają na rozkazy.</span><span><i></i> ŚWIAT ŻYJE</span></div>
+          <div class="map-statusbar">
+            <span id="status-message">LPM zaznacza oddziały · PPM wydaje rozkazy · środkowy przycisk przesuwa mapę</span>
+            <span class="selected-indicator">ZAZNACZONO <b id="selected-count">0</b></span>
+          </div>
         </section>
 
         <aside class="inspector">
-          <div class="inspector-heading"><span>⌘</span><div><b>RADA ZAMKU</b><small>RAPORT NAMIESTNIKA</small></div><button type="button" id="help-button" title="Sterowanie">?</button></div>
-          <section class="realm-card">
-            <div class="realm-card-top"><span>POSIADŁOŚĆ</span><span class="realm-seal">✥</span></div>
-            <h1>Castellum</h1>
-            <p>Twierdza nad Starą Rzeką</p>
-            <div class="realm-stats"><div><b>126</b><small>OSADNICY</small></div><div><b>74</b><small>HONOR</small></div><div><b>82%</b><small>PORZĄDEK</small></div></div>
-          </section>
+          <div class="inspector-heading"><span>⌘</span><div><b>CENTRUM DOWODZENIA</b><small>ROZKAZY I INFORMACJE</small></div><button type="button" id="help-button" title="Sterowanie">?</button></div>
           <section class="selection-section">
-            <div class="section-kicker">OBIEKT / ROZKAZ</div>
+            <div class="section-kicker">AKTUALNE ZAZNACZENIE</div>
             <div id="selection-content">
-              <div class="empty-selection"><span>⌖</span><b>Nie wybrano obiektu</b><p>Zaznacz oddział lub budynek na mapie, aby wyświetlić szczegóły i dostępne rozkazy.</p></div>
+              <div class="empty-selection">
+                <span class="empty-glyph">⌖</span>
+                <b>Nic nie zaznaczono</b>
+                <p>Przeciągnij lewym przyciskiem myszy po mapie, aby zaznaczyć wiele własnych oddziałów.</p>
+              </div>
             </div>
           </section>
-          <section class="build-section" id="build-section">
-            <div class="section-kicker">ROZBUDOWA POSIADŁOŚCI</div>
-            <button class="build-option" id="build-tower" type="button"><span class="build-symbol">▥</span><span><b>Wieża strażnicza</b><small>70 drewna · 30 kamienia</small></span><span class="build-arrow">＋</span></button>
-            <p class="build-note">Wybierz budowlę, a następnie wskaż miejsce na mapie.</p>
+          <section class="orders-section">
+            <div class="section-kicker">ROZKAZY GRUPOWE</div>
+            <div class="order-grid">
+              <button type="button" data-command-global="stop"><span>■</span><b>STOP</b><small>S</small></button>
+              <button type="button" data-command-global="hold"><span>▣</span><b>OBRONA</b><small>H</small></button>
+              <button type="button" data-command-global="attack-move"><span>⚔</span><b>ATAK W RUCHU</b><small>A</small></button>
+            </div>
           </section>
-          <div class="inspector-footer"><span>DOMINIUM</span><span>PROTOTYP 0.1</span></div>
+          <section class="build-section">
+            <div class="section-kicker">ROZBUDOWA TWIERDZY</div>
+            <button class="build-option" id="build-tower" type="button"><span class="build-symbol">▥</span><span><b>Wieża strażnicza</b><small>70 drewna · 30 kamienia</small></span><span class="build-arrow">＋</span></button>
+            <p class="build-note">Wybierz budowlę, następnie kliknij wolne miejsce na mapie.</p>
+          </section>
+          <section class="legend-section">
+            <div class="section-kicker">OZNACZENIA NA MAPIE</div>
+            <div class="legend-grid">
+              <span><i class="legend-dot friendly"></i> Twoje oddziały</span>
+              <span><i class="legend-dot enemy"></i> Wrogowie</span>
+              <span><i class="legend-dot terrain"></i> Roślinność</span>
+              <span><i class="legend-dot stone"></i> Kamień</span>
+              <span><i class="legend-dot water"></i> Woda</span>
+              <span><i class="legend-dot wood"></i> Drewno</span>
+            </div>
+          </section>
+          <div class="inspector-footer"><span>DOMINIUM</span><span>RTS ENGINE · 0.2</span></div>
         </aside>
       </main>
     </div>

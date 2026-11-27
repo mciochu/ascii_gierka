@@ -43,3 +43,30 @@ Production output is generated in `dist/`.
 3. Rendering and simulation remain separate systems.
 4. Glyph density is budgeted and can use level-of-detail rules as the world grows.
 5. The game remains readable at multiple zoom levels.
+
+
+## VPS deployment
+
+The production service is isolated from other applications:
+
+- Source checkout: `/home/ubuntu/services/ascii_gierka/repo`
+- Verified releases: `/home/ubuntu/services/ascii_gierka/releases/`
+- Active build: `/home/ubuntu/services/ascii_gierka/current`
+- HTTP port: `4175`
+- Watcher: checks public GitHub `main` every 60 seconds
+- Deployment: `npm ci`, `npm run verify`, then an atomic symlink switch
+- Autostart: per-user cron `@reboot` entry
+
+Manual deployment:
+
+```bash
+bash /home/ubuntu/services/ascii_gierka/bin/deploy-once.sh
+```
+
+Install or verify autostart:
+
+```bash
+bash /home/ubuntu/services/ascii_gierka/bin/install-autostart.sh
+```
+
+Logs are stored in `/home/ubuntu/services/ascii_gierka/logs/`. The watcher and static server are independent of Karcianka.

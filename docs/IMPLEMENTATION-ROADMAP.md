@@ -85,6 +85,11 @@ Dokument kontrolny względem specyfikacji przekazanej 2026-11-27. Statusy opisuj
 - [ ] Harass, progi oblężenia i konstruowanie machin.
 - [ ] Alerty tekstowe i głosowe, komunikaty o ekonomii/ataku/pożarze.
 - [x] Miesięczny tick dla podstawowego bilansu ekonomicznego i popularności.
+- [x] Dokładne zużycie racji z tabeli: 0 / 0.1 / 0.2 / 0.32 / 0.4 na chłopa; niedobór obniża modyfikator racji do −8.
+- [x] Stałe zużycie piwa 0.144 beczki na gospodę miesięcznie oraz progi bonusu 25/50/75/100%.
+- [x] Koszt łapówek jako jawna konfiguracja; bez wartości kosztu z dokumentu bonus jest zablokowany, a przy braku złota również nie działa.
+- [x] Klawisz P przełącza pauzę; w pauzie nie można wejść w tryb budowania ani ataku.
+- [x] Testy automatyczne symulacji uruchamiane przez `npm run verify`.
 
 ## Dziennik etapów
 ### Etap 1 — zegar i miesięczny bilans (2026-11-27)
@@ -92,4 +97,5 @@ Dokument kontrolny względem specyfikacji przekazanej 2026-11-27. Statusy opisuj
 - Dodano liczniki miesiąca, populacji i popularności oraz kontrolę prędkości.
 - Pauza blokuje budowę i podstawowe rozkazy jednostek; zaznaczanie i inspekcja pozostają dostępne.
 - Uwaga: ten etap nie implementuje jeszcze pracowników, rzeczywistego magazynowania, budynków produkcyjnych ani rekrutacji. Wartości religii/piwa/strachu są na razie stanem symulacji, bez pełnych obiektów świata. Koszty łapówek pozostają nieaktywne, bo specyfikacja nie podaje ich wartości.
-- Weryfikacja: `npm run verify` — TypeScript PASS, Vite build PASS.
+- Weryfikacja po doprecyzowaniu reguł: 9/9 testów symulacji PASS, TypeScript PASS, Vite build PASS.
+- Nieukończone w tym etapie: fizyczne magazyny i transport pieszy, pełny cykl życia pracownika, budynki produkcyjne, wszystkie kategorie HUD, rekrutacja, AI, pełna izometria i mechaniki fortyfikacji.

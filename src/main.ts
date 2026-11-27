@@ -367,9 +367,17 @@ function updateVillagerVisuals(realDeltaSeconds: number): void {
     if (villager.status === "walking-to-work" && !villager.moveTarget && villager.movementQueue.length === 0) {
       const target = { x: villager.targetX ?? villager.x, y: villager.targetY ?? villager.y };
       if (!routeVillagerTo(villager, target)) {
+        // Do not leave a phantom worker in the site's roster when a path is blocked.
+        for (const site of simulation.worksites) {
+          const workerIndex = site.workerIds.indexOf(villager.id);
+          if (workerIndex >= 0) site.workerIds.splice(workerIndex, 1);
+        }
         villager.status = "idle";
         villager.worksiteId = undefined;
+        villager.targetX = undefined;
+        villager.targetY = undefined;
         villager.role = "laborer";
+        syncPopulationCounters(simulation);
       }
     }
     if (villager.status === "leaving" && !villager.moveTarget && villager.movementQueue.length === 0) {
@@ -2240,3 +2248,5 @@ window.addEventListener("resize", () => {
   preserveCameraCenter({ x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 });
   renderMinimap();
 });
+
+[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

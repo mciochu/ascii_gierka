@@ -292,6 +292,9 @@ export function advancePopulation(state: SimulationState, scaledDeltaSeconds: nu
   state.villagers = state.villagers.filter((villager) =>
     villager.status !== "leaving" || (!villager.departed && state.elapsedSeconds - (villager.departureStartedAt ?? state.elapsedSeconds) < 60)
   );
+  // A villager can disappear after reaching the map edge (or the timeout). Refresh
+  // counters before evaluating housing and campfire limits, not only on early returns.
+  syncPopulationCounters(state);
   if (state.popularity < 50 || state.population >= state.housing || state.unemployed >= CAMPFIRE_IDLE_LIMIT) {
     if (state.popularity < 50) state.spawnProgress = 0;
     syncPopulationCounters(state);
@@ -442,3 +445,5 @@ export function setGameSpeed(state: SimulationState, next: number): number {
   state.speed = Math.max(MIN_GAME_SPEED, Math.min(MAX_GAME_SPEED, Math.round(next)));
   return state.speed;
 }
+
+[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

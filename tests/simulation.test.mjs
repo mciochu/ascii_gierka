@@ -195,6 +195,20 @@ test('poniżej popularności 50 mieszkańcy odchodzą, zaczynając od pracownik�
   assert.equal(state.population, 7);
 });
 
+test('usunięcie mieszkańca po dotarciu do krawędzi natychmiast synchronizuje populację i bezrobotnych', () => {
+  const state = createSimulation();
+  const leaving = state.villagers[3]; // an unemployed resident who has reached the edge
+  leaving.status = 'leaving';
+  leaving.departed = true;
+  leaving.departureStartedAt = 0;
+  state.elapsedSeconds = 10;
+  assert.equal(state.population, 8);
+  advancePopulation(state, 0);
+  assert.equal(state.population, 7);
+  assert.equal(state.unemployed, 4);
+  assert.equal(state.worksites[0].workerIds.length, 3);
+});
+
 test('Dobre i Złe Rzeczy znoszą się, a strach skaluje się z populacją do +/-5', () => {
   const good = Array.from({ length: 2 }, (_, index) => ({ id: 'g' + index, kind: 'good', x: index, y: 0 }));
   const bad = [{ id: 'b1', kind: 'bad', x: 0, y: 0 }];
@@ -229,3 +243,5 @@ test('prędkość jest ograniczona do 20–90, a miesiąc nalicza się po 30 sek
   assert.equal(advanceSimulation(state, 1).length, 1);
   assert.equal(state.month, 2);
 });
+
+[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

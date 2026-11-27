@@ -178,14 +178,22 @@ Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
 - Zapis lokalny obejmuje mieszkańców, pozycje i trasy, miejsca pracy, błogosławieństwa, obiekty strachu, licznik nowych budynków, cofanie i zwroty kosztów. Starszy zapis z etapu 2 jest migrowany do domyślnego modelu mieszkańców.
 
 **Wynik testów**
-- 49/49 testów automatycznych PASS, w tym testy tempa przyrostu, limitu 24, zatrudniania, rekrutacyjnego zużycia chłopa, odejścia pracownika, religii, błogosławieństw, strachu, tras ognisko–młyn i regresji etapów 1–2.
+- 50/50 testów automatycznych PASS, w tym testy tempa przyrostu, limitu 24, zatrudniania, rekrutacyjnego zużycia chłopa, odejścia pracownika, synchronizacji populacji po opuszczeniu mapy, religii, błogosławieństw, strachu, tras ognisko–młyn i regresji etapów 1–2.
 - TypeScript PASS.
 - Vite production build PASS.
 - `git diff --check` PASS.
 - Ręczny test wizualny w przeglądarce nie został wykonany na VPS; Chromium nadal nie uruchamia się bez systemowej biblioteki `libatk-1.0.so.0`.
+
+**Audyt poprawkowy po wdrożeniu (2026-11-27)**
+- Znaleziono i naprawiono nieaktualizowanie liczników populacji po usunięciu mieszkańca, który już dotarł do krawędzi mapy. Liczniki są teraz synchronizowane bezpośrednio po czyszczeniu listy mieszkańców, przed sprawdzeniem limitów mieszkań i ogniska.
+- Naprawiono ścieżkę błędu dojścia do miejsca pracy: pracownik, dla którego nie da się wyznaczyć trasy, jest usuwany z listy obsady budynku i wraca do statusu bezrobotnego. Nie blokuje już miejsca pracy jako „duchowy” pracownik.
+- Dodano test regresyjny dla natychmiastowego opuszczenia mapy; pełny zestaw ma 50/50 PASS.
+- TypeScript, build i `git diff --check` PASS. Nadal nie wykonano ręcznego testu wizualnego w przeglądarce z powodu braku `libatk-1.0.so.0` w środowisku VPS.
 
 **Granice etapu 3 — świadomie pozostawione na później**
 - Dostawa, składowanie i fizyczne zużywanie beczek piwa wymagają Składu i logistyki z etapu 4. Gospoda jest budowalna i zatrudnia karczmarza, ale sama nie tworzy beczek.
 - Mnożnik wydajności pracy jest udostępniony i raportowany; jego wpływ na ilość przetwarzanych towarów zostanie włączony wraz z łańcuchami produkcji w etapie 4.
 - `recruitFromCampfire` realizuje zużycie bezrobotnego, natomiast pełny panel rekrutacji, typy jednostek, ceny i pobieranie uzbrojenia należą do etapu 5.
 - Rzeczywista liczebność mieszkańców jest rozdzielona od żołnierzy; żołnierze nie płacą podatków i nie zużywają racji.
+
+[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

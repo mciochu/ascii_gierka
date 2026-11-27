@@ -39,7 +39,7 @@ Zakres: sekcja 4 specyfikacji.
 - Pełny bilans racji i różnorodności, podatków/łapówek, piwa, religii i Fear Factor.
 - Rzeczywiste obiekty Dobrych i Złych Rzeczy, księża i wygasające błogosławieństwa.
 - Raport popularności „W nadchodzącym miesiącu” z rozbiciem wszystkich modyfikatorów.
-**Status: częściowe podstawy ekonomii są już w kodzie; pełny cykl życia mieszkańców pozostaje do wykonania.**
+**Status: wdrożony w zakresie mieszkańców, zatrudniania i podstawowego bilansu popularności.** Dostawy beczek piwa oraz pełna wydajność łańcuchów produkcji pozostają zależne od etapu 4, a właściwy interfejs rekrutacji i pełne koszty oddziałów od etapu 5.
 
 ### Etap 4 — magazyny, logistyka i łańcuchy produkcyjne
 Zakres: sekcja 5 specyfikacji oraz fizyczne zasoby z sekcji 1.
@@ -154,3 +154,38 @@ Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
 - Prawdziwy ranking Lordów, rozkazy sojuszniczym botom i transfery zasobów wymagają systemu Lordów i AI z etapów 5–6.
 - Patrol, ostrzał punktu, rekrutacja i pełen zestaw rozkazów specjalnych zostają do etapu 5.
 - Zapis jest lokalny dla przeglądarki/originu; nie jest synchronizowany między urządzeniami.
+
+### Etap 3 — mieszkańcy, populacja i popularność (2026-11-27)
+
+**Mieszkańcy i ognisko**
+- `src/engine/simulation.ts`: symulacja ma osobne obiekty chłopów z pozycją, statusem, rolą, przypisaniem do miejsca pracy, trasą ruchu i czasem błogosławieństwa.
+- Na starcie jest 8 chłopów; trzy osoby automatycznie obsadzają istniejący młyn, a pozostałe pięć pozostaje przy ognisku. Pracownicy i kapłani są widoczni na mapie jako znaki Unicode i poruszają się po siatce z etapu 1.
+- Ognisko ma zielony/czerwony pierścień i wskaźnik postępu. Przyrost jest ciągły: `popularność / 100` jednostki postępu na miesiąc gry; przy 100 popularności jeden chłop przybywa w miesiącu, przy 50 — w dwóch. To jawny, regulowany parametr tempa, ponieważ specyfikacja nie podaje dokładnej liczby sekund.
+- Nowy mieszkaniec pojawia się wyłącznie przy popularności co najmniej 50, wolnym miejscu mieszkalnym i mniej niż 24 bezrobotnych. Jest automatycznie wysyłany do pierwszego nieobsadzonego miejsca pracy.
+- Spadek popularności poniżej 50 zatrzymuje przyrost i uruchamia odchodzenie mieszkańców. Najpierw zwalniane są stanowiska produkcyjne; mieszkaniec przestaje zajmować miejsce pracy od razu, ale znika z populacji po opuszczeniu mapy.
+- `recruitFromCampfire` zużywa jednego bezrobotnego chłopa. Żołnierze pozostają poza liczbą mieszkańców, limitami chat i konsumpcją żywności. Pełny ekran rekrutacji, ceny jednostek oraz sprzęt koszar należą do etapu 5.
+
+**Budynki, religia i strach**
+- Chata jest budowalna za 6 drewna i dodaje `+8` miejsc.
+- Kaplica, kościół i katedra tworzą obsadzone miejsca pracy dla kapłanów. Kapłani poruszają się po zamku i błogosławią mieszkańców; każde błogosławieństwo wygasa po 90 sekundach gry (parametr do strojenia). Pierwszy kościół daje `+1`, pierwsza katedra `+2`; kolejne tego samego typu nie kumulują bonusu.
+- Gospoda kosztuje 20 drewna i 100 złota oraz zatrudnia jednego karczmarza. Obsługuje maksymalnie 30 mieszkańców. Premia i zużycie 0,144 beczki miesięcznie działają dopiero, gdy beczki piwa są fizycznie dostępne; dostawy ze Składu są etapem 4.
+- Dodano podstawowe obiekty Dobrych Rzeczy (ogród, 20 złota) i Złych Rzeczy (szubienica, 40 złota). Liczą się do różnicy obiektów, niezależnie od położenia. Koszty używają dolnej granicy przedziałów podanych dla tych kategorii w instrukcji HD.
+- Strach jest wyliczany z różnicy liczby dobrych i złych obiektów w proporcji około jeden obiekt na 15 mieszkańców na poziom, z ograniczeniem `−5…+5`. Dodatni strach podnosi obrażenia własnego wojska o 5% na poziom i ogranicza wydajność pracy o 10% na poziom; ujemny zmniejsza obrażenia o 5% i podnosi wydajność pracy o 10% na poziom. Mnożnik obrażeń jest podłączony do aktualnej walki; mnożnik pracy jest raportowany i czeka na integrację z produkcją w etapie 4.
+
+**Raporty, zapis i interfejs**
+- Księga raportów pokazuje prognozę „W nadchodzącym miesiącu”, osobno racje, różnorodność, podatki/łapówki, piwo, religię, błogosławieństwa i strach oraz stan bezrobotnych, pracy, kapłanów i obiektów strachu.
+- Liczniki mieszkańców i bezrobotnych są odświeżane w górnym pasku i panelu Skryby; minimapa pokazuje także cywilów.
+- Zapis lokalny obejmuje mieszkańców, pozycje i trasy, miejsca pracy, błogosławieństwa, obiekty strachu, licznik nowych budynków, cofanie i zwroty kosztów. Starszy zapis z etapu 2 jest migrowany do domyślnego modelu mieszkańców.
+
+**Wynik testów**
+- 49/49 testów automatycznych PASS, w tym testy tempa przyrostu, limitu 24, zatrudniania, rekrutacyjnego zużycia chłopa, odejścia pracownika, religii, błogosławieństw, strachu, tras ognisko–młyn i regresji etapów 1–2.
+- TypeScript PASS.
+- Vite production build PASS.
+- `git diff --check` PASS.
+- Ręczny test wizualny w przeglądarce nie został wykonany na VPS; Chromium nadal nie uruchamia się bez systemowej biblioteki `libatk-1.0.so.0`.
+
+**Granice etapu 3 — świadomie pozostawione na później**
+- Dostawa, składowanie i fizyczne zużywanie beczek piwa wymagają Składu i logistyki z etapu 4. Gospoda jest budowalna i zatrudnia karczmarza, ale sama nie tworzy beczek.
+- Mnożnik wydajności pracy jest udostępniony i raportowany; jego wpływ na ilość przetwarzanych towarów zostanie włączony wraz z łańcuchami produkcji w etapie 4.
+- `recruitFromCampfire` realizuje zużycie bezrobotnego, natomiast pełny panel rekrutacji, typy jednostek, ceny i pobieranie uzbrojenia należą do etapu 5.
+- Rzeczywista liczebność mieszkańców jest rozdzielona od żołnierzy; żołnierze nie płacą podatków i nie zużywają racji.

@@ -508,3 +508,44 @@ export function createWatchtower(parent: Container, x: number, y: number, index:
 }
 
 export const WORLD_SIZE = { width: WORLD_WIDTH, height: WORLD_HEIGHT };
+
+
+export type TownBuildingType = "hovel" | "chapel" | "church" | "cathedral" | "inn" | "good" | "bad";
+
+export function createTownBuilding(
+  parent: Container,
+  type: TownBuildingType,
+  index: number,
+  x: number,
+  y: number
+): GameEntity {
+  const group = new Container();
+  parent.addChild(group);
+  const visuals: Record<TownBuildingType, { glyph: string; name: string; role: string; color: string; label: string }> = {
+    hovel: { glyph: "⌂", name: "Chata", role: "MIESZKANIE · +8 MIEJSC", color: "#b78b58", label: "CHATA" },
+    chapel: { glyph: "✝", name: "Kaplica", role: "RELIGIA · KSIĄDZ", color: "#c5b7df", label: "KAPLICA" },
+    church: { glyph: "✝", name: "Kościół", role: "RELIGIA · +1 POPULARNOŚCI", color: "#e0c77e", label: "KOŚCIÓŁ" },
+    cathedral: { glyph: "♜", name: "Katedra", role: "RELIGIA · +2 POPULARNOŚCI", color: "#e3d3a4", label: "KATEDRA" },
+    inn: { glyph: "♨", name: "Gospoda", role: "GOSPODA · 1 KARCZMARZ", color: "#d4ab69", label: "GOSPODA" },
+    good: { glyph: "✿", name: "Ogród", role: "DOBRA RZECZ · STRACH", color: "#79c77e", label: "OGRÓD" },
+    bad: { glyph: "†", name: "Szubienica", role: "ZŁA RZECZ · STRACH", color: "#d16d65", label: "SZUBIENICA" }
+  };
+  const visual = visuals[type];
+  addGlyph(group, { char: type === "hovel" ? "⌂" : type === "bad" ? "†" : visual.glyph, x: 0, y: -7, size: type === "cathedral" ? 43 : 36, color: visual.color, weight: "bold", stroke: "#080a0b", strokeWidth: 1 });
+  if (type !== "good" && type !== "bad") {
+    addGlyph(group, { char: type === "hovel" ? "╱" : "═", x: 0, y: 8, size: 31, color: "#a9b5b9", alpha: 0.8 });
+  }
+  addWord(group, visual.label, 0, 29, 7, visual.color, 0.76);
+  group.position.set(x, y);
+  const id = type === "good" || type === "bad" ? `fear-${type}-${index}` : `${type}-${index}`;
+  const description: Record<TownBuildingType, string> = {
+    hovel: "Miejsce zamieszkania dla ośmiu dodatkowych chłopów.",
+    chapel: "Kapłan chodzi po zamku i błogosławi napotkanych mieszkańców.",
+    church: "Kapłan błogosławi mieszkańców; co najmniej jeden kościół daje +1 popularności.",
+    cathedral: "Kapłan błogosławi mieszkańców; katedra daje +2 popularności.",
+    inn: "Karczmarz obsługuje do trzydziestu mieszkańców; bonus wymaga piwa dostarczonego ze Składu.",
+    good: "Obiekt Dobrych Rzeczy podnosi współczynnik strachu, popularność i obrażenia, ale obniża wydajność pracy.",
+    bad: "Obiekt Złych Rzeczy obniża współczynnik strachu i obrażenia, ale zwiększa wydajność pracy."
+  };
+  return entity(group, id, visual.name, "building", description[type], visual.role, x, y, 100);
+}

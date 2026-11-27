@@ -75,15 +75,15 @@ export const BUILD_CATEGORIES: BuildCategory[] = [
     id: "town", name: "Miasto", shortName: "MIASTO", glyph: "⌂",
     description: "Mieszkania, religia, usługi i obiekty wpływające na strach.",
     items: [
-      { id: "hovel", name: "Chata (Hovel)", glyph: "⌂", note: unavailable },
-      { id: "chapel", name: "Kaplica", glyph: "✝", note: unavailable },
-      { id: "church", name: "Kościół", glyph: "✝", note: unavailable },
-      { id: "cathedral", name: "Katedra", glyph: "♜", note: unavailable },
+      { id: "hovel", name: "Chata (Hovel)", glyph: "⌂", cost: "6 drewna · +8 miejsc", implemented: true, note: "Zwiększa pojemność mieszkalną o 8 chłopów." },
+      { id: "chapel", name: "Kaplica", glyph: "✝", cost: "250 złota · 1 ksiądz", implemented: true, note: "Kapłan chodzi po zamku i błogosławi mieszkańców." },
+      { id: "church", name: "Kościół", glyph: "✝", cost: "500 złota · 1 ksiądz", implemented: true, note: "Kapłan błogosławi mieszkańców; pierwszy kościół daje +1 popularności." },
+      { id: "cathedral", name: "Katedra", glyph: "♜", cost: "1000 złota · 1 ksiądz", implemented: true, note: "Kapłan błogosławi mieszkańców; pierwsza katedra daje +2 popularności." },
       { id: "apothecary", name: "Apteka", glyph: "⚕", note: unavailable },
       { id: "well", name: "Studnia", glyph: "◉", note: unavailable },
       { id: "water-pot", name: "Zbiornik wodny (Water Pot)", glyph: "◉", note: unavailable },
-      { id: "good-things", name: "Dobre Rzeczy · ogrody, pomniki, staw, słupy", glyph: "✿", note: unavailable },
-      { id: "bad-things", name: "Złe Rzeczy · szubienice, dyby, koło, doły z wapnem", glyph: "†", note: unavailable }
+      { id: "good-things", name: "Dobre Rzeczy · ogród", glyph: "✿", cost: "20 złota · obiekt podstawowy", implemented: true, note: "Zwiększa popularność i obrażenia wojska, ale zmniejsza wydajność pracy." },
+      { id: "bad-things", name: "Złe Rzeczy · szubienica", glyph: "†", cost: "40 złota · obiekt podstawowy", implemented: true, note: "Zmniejsza popularność i obrażenia wojska, ale zwiększa wydajność pracy." }
     ]
   },
   {
@@ -104,7 +104,7 @@ export const BUILD_CATEGORIES: BuildCategory[] = [
       { id: "mill", name: "Młyn", glyph: "✣", note: unavailable },
       { id: "bakery", name: "Piekarnia", glyph: "♨", note: unavailable },
       { id: "brewery", name: "Browar", glyph: "♜", note: unavailable },
-      { id: "inn", name: "Gospoda (Inn)", glyph: "♧", note: unavailable }
+      { id: "inn", name: "Gospoda (Inn)", glyph: "♧", cost: "20 drewna · 100 złota · 1 karczmarz", implemented: true, note: "Obsługuje do 30 mieszkańców. Bonus wymaga piwa dostarczonego ze Składu (etap 4)." }
     ]
   }
 ];

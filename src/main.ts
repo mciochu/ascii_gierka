@@ -1,8 +1,26 @@
 import { Application, Container, Text } from "pixi.js";
 import "./style.css";
 import { addGlyph } from "./engine/glyph";
-import { createWatchtower, createWorld, WORLD_SIZE, type GameEntity } from "./engine/world";
-import { advanceSimulation, createSimulation, setGameSpeed, TAX_RULES } from "./engine/simulation";
+import { createWatchtower, createTownBuilding, createWorld, WORLD_SIZE, type GameEntity, type TownBuildingType } from "./engine/world";
+import {
+  addWorksite,
+  advanceSimulation,
+  assignAvailableWorkers,
+  calculateFearFactor,
+  CAMPFIRE,
+  BLESSING_DURATION_SECONDS,
+  VILLAGER_MOVE_SPEED,
+  getFearDamageMultiplier,
+  getFearWorkMultiplier,
+  getPopularityModifiers,
+  removeWorksite,
+  setGameSpeed,
+  setHovelCapacity,
+  syncPopulationCounters,
+  updateBlessedShare,
+  createSimulation,
+  TAX_RULES
+} from "./engine/simulation";
 import { BUILD_CATEGORIES, findBuildCategory, findBuildItem } from "./ui/catalog";
 import {
   findGridPath,
@@ -17,6 +35,15 @@ import {
 type ToolMode = "select" | "attack-move" | "build" | "demolish";
 type CameraState = { x: number; y: number; zoom: number; rotation: number };
 type SavedEntity = Omit<GameEntity, "group">;
+type PlacedStructureCost = {
+  wood: number;
+  stone: number;
+  gold: number;
+  housing?: number;
+  worksiteId?: string;
+  fearObjectId?: string;
+};
+
 interface GameSave {
   version: 1;
   savedAt: string;
@@ -24,9 +51,10 @@ interface GameSave {
   entities: SavedEntity[];
   selectedIds: string[];
   controlGroups: [number, string[]][];
-  placedStructures: [string, { wood: number; stone: number }][];
+  placedStructures: [string, PlacedStructureCost][];
   undoStack: string[];
   towerCounter: number;
+  townBuildingCounter: number;
   camera: CameraState;
   cameraBookmarks: [number, CameraState][];
   lastCameraBeforeJump: CameraState | null;
@@ -131,9 +159,24 @@ let minimapPointerId: number | null = null;
 let lastSelectedGroupKey: { number: number; at: number } | null = null;
 let lastCameraBeforeJump: CameraState | null = null;
 const cameraBookmarks = new Map<number, CameraState>();
-const placedStructures = new Map<string, { wood: number; stone: number }>();
+const placedStructures = new Map<string, PlacedStructureCost>();
 const undoStack: string[] = [];
+let townBuildingCounter = 0;
 let minimapRefresh = 0;
+const villagerViews = new Map<string, Text>();
+let campfireRingGreen: Text;
+let campfireRingRed: Text;
+let campfireGlyph: Text;
+let campfireLabel: Text;
+let campfireProgressGlyph: Text;
+function createCampfireVisuals(): void {
+  campfireRingGreen = addGlyph(world.layers.details, { char: "◌", x: CAMPFIRE.x, y: CAMPFIRE.y, size: 62, color: "#68d47f", alpha: 0.9 });
+  campfireRingRed = addGlyph(world.layers.details, { char: "◌", x: CAMPFIRE.x, y: CAMPFIRE.y, size: 62, color: "#ef625d", alpha: 0 });
+  campfireProgressGlyph = addGlyph(world.layers.details, { char: "◔", x: CAMPFIRE.x, y: CAMPFIRE.y, size: 62, color: "#d8f1d7", alpha: 0.95 });
+  campfireGlyph = addGlyph(world.layers.details, { char: "♨", x: CAMPFIRE.x, y: CAMPFIRE.y, size: 35, color: "#e4ad55", alpha: 0.96 });
+  campfireLabel = addGlyph(world.layers.details, { char: "0/24", x: CAMPFIRE.x, y: CAMPFIRE.y - 44, size: 13, color: "#9bd8a7", alpha: 0.9, weight: "bold" });
+}
+createCampfireVisuals();
 let lastViewportCenter = { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 };
 
 function setStatus(message: string): void {
@@ -161,7 +204,7 @@ function setMode(next: ToolMode): void {
   const hints: Record<ToolMode, string> = {
     select: "LPM: WYBÓR / ROZKAZ · SHIFT+LPM: KOLEJNY PUNKT TRASY",
     "attack-move": "LPM WSKAŻ CEL ATAKU W RUCHU · PPM ANULUJE",
-    build: "LPM POSTAW WIEŻĘ · PPM ANULUJE",
+    build: "LPM POSTAW WYBRANĄ BUDOWLĘ · PPM ANULUJE",
     demolish: "LPM WYBIERZ WŁASNĄ WIEŻĘ DO BURZENIA · PPM ANULUJE"
   };
   modeLabel.textContent = labels[mode] ?? labels.select;
@@ -202,9 +245,10 @@ function selectBuildItem(itemId: string): void {
     setStatus(item.name + ": " + (item.note ?? "Mechanika nie jest jeszcze dostępna."));
     return;
   }
-  if (itemId === "watchtower") {
+  const stageThreeBuildings = ["hovel", "chapel", "church", "cathedral", "inn", "good-things", "bad-things"];
+  if (itemId === "watchtower" || stageThreeBuildings.includes(itemId)) {
     setMode("build");
-    setStatus("Budowa wieży: kliknij wolne, dozwolone pole mapy. Koszt: 70 drewna i 30 kamienia.");
+    setStatus("Budowa: kliknij wolne, dozwolone pole mapy. " + (item.cost ?? ""));
     return;
   }
   setMode("select");
@@ -230,6 +274,8 @@ function updateScribe(): void {
     popularity.style.color = simulation.popularity >= 50 ? "#68cc83" : "#f06c65";
   }
   if (population) population.textContent = simulation.population + "/" + simulation.housing;
+  const unemployed = document.querySelector<HTMLElement>("#scribe-unemployed");
+  if (unemployed) unemployed.textContent = simulation.unemployed + " PRZY OGNISKU";
   if (face) {
     face.textContent = simulation.popularity >= 65 ? "☺" : simulation.popularity >= 50 ? "◡" : "☹";
     face.style.color = simulation.popularity >= 50 ? "#e5c579" : "#f07870";
@@ -255,6 +301,140 @@ function redrawSelectionMarkers(): void {
     });
     selectionMarkers.set(entity.id, marker);
   }
+}
+
+function routeVillagerTo(villager: (typeof simulation.villagers)[number], target: { x: number; y: number }): boolean {
+  const route = findGridPath(world.grid, villager, target);
+  if (!route) return false;
+  villager.movementQueue = route.slice(1);
+  villager.moveTarget = route[0] ?? { ...target };
+  return true;
+}
+
+function routeVillagerOut(villager: (typeof simulation.villagers)[number]): void {
+  const current = worldToCell(world.grid, villager);
+  if (!current) return;
+  const edgeTiles = world.grid.tiles.filter((tile) =>
+    tile.walkable && (tile.row === 0 || tile.row === world.grid.rows - 1 || tile.col === 0 || tile.col === world.grid.columns - 1)
+  );
+  edgeTiles.sort((left, right) =>
+    (Math.abs(left.col - current.col) + Math.abs(left.row - current.row)) -
+    (Math.abs(right.col - current.col) + Math.abs(right.row - current.row))
+  );
+  for (const tile of edgeTiles.slice(0, 12)) {
+    const exit = worldPositionForCell(world.grid, tile.col, tile.row);
+    if (exit && routeVillagerTo(villager, exit)) return;
+  }
+}
+
+function advanceVillagerRoute(villager: (typeof simulation.villagers)[number], gameDelta: number): boolean {
+  if (!villager.moveTarget) return true;
+  const dx = villager.moveTarget.x - villager.x;
+  const dy = villager.moveTarget.y - villager.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= 4) {
+    villager.x = villager.moveTarget.x;
+    villager.y = villager.moveTarget.y;
+    villager.moveTarget = villager.movementQueue.shift();
+    return !villager.moveTarget && villager.movementQueue.length === 0;
+  }
+  const step = Math.min(distance, VILLAGER_MOVE_SPEED * gameDelta);
+  villager.x += dx / distance * step;
+  villager.y += dy / distance * step;
+  return false;
+}
+
+function updateVillagerVisuals(realDeltaSeconds: number): void {
+  const gameDelta = paused ? 0 : realDeltaSeconds * (simulation.speed / 40);
+  const activeIds = new Set(simulation.villagers.map((villager) => villager.id));
+  for (const [id, glyph] of villagerViews) {
+    if (!activeIds.has(id)) { glyph.destroy(); villagerViews.delete(id); }
+  }
+
+  for (const villager of simulation.villagers) {
+    let glyph = villagerViews.get(villager.id);
+    if (!glyph) {
+      glyph = addGlyph(world.layers.actors, {
+        char: villager.role === "priest" ? "♙" : "♟",
+        x: villager.x, y: villager.y, size: 19,
+        color: villager.status === "leaving" ? "#b36b62" : villager.role === "priest" ? "#e9dfbc" : "#8bd18a",
+        alpha: 0.96, stroke: "#10140f", strokeWidth: 1
+      });
+      villagerViews.set(villager.id, glyph);
+    }
+    glyph.text = villager.role === "priest" ? "♙" : "♟";
+    glyph.style.fill = villager.status === "leaving" ? "#b36b62" : villager.role === "priest" ? "#e9dfbc" : "#8bd18a";
+    if (villager.status === "walking-to-work" && !villager.moveTarget && villager.movementQueue.length === 0) {
+      const target = { x: villager.targetX ?? villager.x, y: villager.targetY ?? villager.y };
+      if (!routeVillagerTo(villager, target)) {
+        villager.status = "idle";
+        villager.worksiteId = undefined;
+        villager.role = "laborer";
+      }
+    }
+    if (villager.status === "leaving" && !villager.moveTarget && villager.movementQueue.length === 0) {
+      routeVillagerOut(villager);
+    }
+    if (gameDelta > 0 && (villager.status === "walking-to-work" || villager.status === "leaving")) {
+      const arrived = advanceVillagerRoute(villager, gameDelta);
+      if (arrived && villager.status === "leaving") villager.departed = true;
+      if (arrived && villager.status === "walking-to-work") {
+        const site = simulation.worksites.find((candidate) => candidate.id === villager.worksiteId);
+        if (site) {
+          const slot = Math.max(0, site.workerIds.indexOf(villager.id));
+          const angle = slot * 2.399963229728653;
+          villager.x = site.x + Math.cos(angle) * 22;
+          villager.y = site.y + Math.sin(angle) * 18;
+        }
+        villager.status = "working";
+      }
+    }
+    glyph.position.set(villager.x, villager.y);
+  }
+
+  // Priests roam between residents. Blessings expire, so they revisit the least recently blessed people.
+  for (const priest of simulation.villagers.filter((villager) => villager.role === "priest" && villager.status === "working")) {
+    if (priest.blessingReadyAt && priest.blessingReadyAt > simulation.elapsedSeconds) continue;
+    let target = simulation.villagers.find((villager) => villager.id === priest.blessingTargetId && villager.status !== "leaving" && villager.role !== "priest");
+    if (!target || (!priest.moveTarget && priest.movementQueue.length === 0 && Math.hypot(target.x - priest.x, target.y - priest.y) < 70)) {
+      target = simulation.villagers
+        .filter((villager) => villager.status !== "leaving" && villager.role !== "priest" && villager.id !== priest.id)
+        .sort((left, right) => left.blessedUntil - right.blessedUntil || Math.hypot(left.x - priest.x, left.y - priest.y) - Math.hypot(right.x - priest.x, right.y - priest.y))[0];
+      priest.blessingTargetId = target?.id;
+      priest.moveTarget = undefined;
+      priest.movementQueue = [];
+    }
+    if (!target) continue;
+    if (Math.hypot(target.x - priest.x, target.y - priest.y) <= 68) {
+      target.blessedUntil = simulation.elapsedSeconds + BLESSING_DURATION_SECONDS;
+      priest.blessingTargetId = undefined;
+      priest.blessingReadyAt = simulation.elapsedSeconds + 2;
+      priest.moveTarget = undefined;
+      priest.movementQueue = [];
+      continue;
+    }
+    if (!priest.moveTarget && priest.movementQueue.length === 0) routeVillagerTo(priest, target);
+    if (gameDelta > 0) advanceVillagerRoute(priest, gameDelta);
+    const view = villagerViews.get(priest.id);
+    if (view) view.position.set(priest.x, priest.y);
+  }
+
+  syncPopulationCounters(simulation);
+  simulation.fear = calculateFearFactor(simulation.fearObjects, simulation.population);
+  updateBlessedShare(simulation);
+  const topPopulation = document.querySelector<HTMLElement>("#population-value");
+  if (topPopulation) topPopulation.textContent = simulation.population + "/" + simulation.housing;
+  const topPopularity = document.querySelector<HTMLElement>("#popularity-value");
+  if (topPopularity) topPopularity.textContent = String(simulation.popularity);
+  campfireRingGreen.alpha = simulation.popularity >= 50 ? 0.95 : 0.12;
+  campfireRingRed.alpha = simulation.popularity < 50 ? 0.95 : 0.12;
+  campfireLabel.text = simulation.unemployed + "/24 · " + Math.round(simulation.spawnProgress * 100) + "%";
+  campfireLabel.style.fill = simulation.unemployed >= 24 ? "#ef7770" : "#9bd8a7";
+  const ring = ["◔", "◑", "◕", "●"];
+  campfireProgressGlyph.text = ring[Math.min(3, Math.floor(simulation.spawnProgress * 4))] ?? "◔";
+  campfireProgressGlyph.alpha = simulation.popularity >= 50 && simulation.population < simulation.housing && simulation.unemployed < 24 ? 0.95 : 0.18;
+  campfireGlyph.alpha = simulation.unemployed >= 24 ? 0.55 : 0.96;
+  updateScribe();
 }
 
 function renderSelectionPanel(): void {
@@ -663,12 +843,92 @@ function placeWatchtower(x: number, y: number): void {
   towerCounter += 1;
   const tower = createWatchtower(world.layers.structures, buildPoint.x, buildPoint.y, towerCounter);
   entities.push(tower);
-  placedStructures.set(tower.id, { wood: 70, stone: 30 });
+  placedStructures.set(tower.id, { wood: 70, stone: 30, gold: 0 });
   undoStack.push(tower.id);
   setResources();
   replaceSelection([tower]);
   setMode("select");
   setStatus("Wieża strażnicza wzniesiona.");
+}
+
+function placeTownBuilding(itemId: string, x: number, y: number): void {
+  if (paused) { setStatus("Gra jest wstrzymana — budowanie jest niedostępne."); return; }
+  const types: Record<string, TownBuildingType> = {
+    hovel: "hovel", chapel: "chapel", church: "church", cathedral: "cathedral", inn: "inn",
+    "good-things": "good", "bad-things": "bad"
+  };
+  const type = types[itemId];
+  if (!type) { setStatus("Ta budowla nie jest jeszcze dostępna."); return; }
+  const costs: Record<TownBuildingType, { wood: number; gold: number }> = {
+    hovel: { wood: 6, gold: 0 },
+    chapel: { wood: 0, gold: 250 },
+    church: { wood: 0, gold: 500 },
+    cathedral: { wood: 0, gold: 1000 },
+    inn: { wood: 20, gold: 100 },
+    good: { wood: 0, gold: 20 },
+    bad: { wood: 0, gold: 40 }
+  };
+  const cost = costs[type];
+  if (simulation.wood < cost.wood || simulation.gold < cost.gold) {
+    setStatus("Brakuje surowców: " + (cost.wood ? cost.wood + " drewna " : "") + (cost.gold ? cost.gold + " złota" : "") + ".");
+    return;
+  }
+  if (x < 40 || y < 40 || x > WORLD_SIZE.width - 40 || y > WORLD_SIZE.height - 40) {
+    setStatus("Nie można budować poza granicami mapy.");
+    return;
+  }
+  const tile = worldToCell(world.grid, { x, y });
+  const point = tile ? worldPositionForCell(world.grid, tile.col, tile.row) : null;
+  if (!point || !isBuildableAtWorld(world.grid, point)) {
+    setStatus("Teren jest niedostępny pod budowę. Wybierz wolny piasek lub inne dozwolone pole.");
+    return;
+  }
+  const clearance = type === "good" || type === "bad" ? 54 : 86;
+  if (entities.some((entity) => Math.hypot(entity.x - point.x, entity.y - point.y) < (entity.kind === "building" ? clearance : 48))) {
+    setStatus("To miejsce jest zajęte. Wybierz wolne pole.");
+    return;
+  }
+
+  townBuildingCounter += 1;
+  const building = createTownBuilding(world.layers.structures, type, townBuildingCounter, point.x, point.y);
+  entities.push(building);
+  simulation.wood -= cost.wood;
+  simulation.gold -= cost.gold;
+
+  const record: PlacedStructureCost = { wood: cost.wood, stone: 0, gold: cost.gold };
+  if (type === "hovel") {
+    record.housing = 8;
+    setHovelCapacity(simulation, 1);
+  } else if (type === "chapel" || type === "church" || type === "cathedral") {
+    record.worksiteId = building.id;
+    addWorksite(simulation, {
+      id: building.id, kind: "religion", requiredWorkers: 1, workerIds: [],
+      x: building.x, y: building.y, buildingType: type
+    });
+  } else if (type === "inn") {
+    record.worksiteId = building.id;
+    addWorksite(simulation, { id: building.id, kind: "inn", requiredWorkers: 1, workerIds: [], x: building.x, y: building.y });
+  } else {
+    record.fearObjectId = building.id;
+    simulation.fearObjects.push({ id: building.id, kind: type, x: building.x, y: building.y });
+    simulation.fear = calculateFearFactor(simulation.fearObjects, simulation.population);
+  }
+  placedStructures.set(building.id, record);
+  undoStack.push(building.id);
+  syncPopulationCounters(simulation);
+  updateVillagerVisuals(0);
+  setResources();
+  replaceSelection([building]);
+  setMode("select");
+  renderMinimap();
+  const placementNote = type === "hovel"
+    ? "Pojemność mieszkalna +8."
+    : type === "good" || type === "bad"
+      ? "Współczynnik strachu: " + simulation.fear + "."
+      : type === "inn"
+        ? "Karczmarz obsadza gospodę. Dostawy piwa ze Składu zostaną uruchomione w etapie 4."
+        : "Miejsce pracy dla kapłana utworzone.";
+  setStatus(building.name + " wzniesiono. " + placementNote);
 }
 
 function removePlacedStructure(entity: GameEntity, refundRatio: number): boolean {
@@ -681,11 +941,21 @@ function removePlacedStructure(entity: GameEntity, refundRatio: number): boolean
   entity.group.destroy({ children: true });
   simulation.wood += Math.floor(cost.wood * refundRatio);
   simulation.stone += Math.floor(cost.stone * refundRatio);
+  simulation.gold += Math.floor(cost.gold * refundRatio);
+  if (cost.housing) setHovelCapacity(simulation, -1);
+  if (cost.worksiteId) removeWorksite(simulation, cost.worksiteId);
+  if (cost.fearObjectId) {
+    simulation.fearObjects = simulation.fearObjects.filter((object) => object.id !== cost.fearObjectId);
+    simulation.fear = calculateFearFactor(simulation.fearObjects, simulation.population);
+  }
   placedStructures.delete(entity.id);
   const stackIndex = undoStack.lastIndexOf(entity.id);
   if (stackIndex >= 0) undoStack.splice(stackIndex, 1);
+  syncPopulationCounters(simulation);
+  updateVillagerVisuals(0);
   setResources();
   updateSelection();
+  renderMinimap();
   return true;
 }
 
@@ -726,7 +996,8 @@ function handleLeftClick(clientX: number, clientY: number, additive: boolean, to
   const entity = findEntityAt(point.x, point.y);
 
   if (mode === "build") {
-    placeWatchtower(point.x, point.y);
+    if (selectedBuildItemId === "watchtower") placeWatchtower(point.x, point.y);
+    else placeTownBuilding(selectedBuildItemId ?? "", point.x, point.y);
     return;
   }
   if (mode === "demolish") {
@@ -1005,32 +1276,20 @@ function closeDialog(): void {
 }
 
 function renderReports(): void {
+  const modifiers = getPopularityModifiers(simulation);
   const ration = simulation.food <= 0 ? 0 : simulation.ration;
-  const rationMods: Record<number, number> = { 0: -8, 0.5: -4, 1: 0, 1.5: 4, 2: 8 };
-  const rationNames: Record<number, string> = { 0: "Brak", 0.5: "Połowa", 1: "Normalne", 1.5: "Dodatkowe", 2: "Podwójne" };
   const monthlyFoodPerVillager: Record<number, number> = { 0: 0, 0.5: 0.1, 1: 0.2, 1.5: 0.32, 2: 0.4 };
   const requestedFood = simulation.population * monthlyFoodPerVillager[ration];
-  const foodShortage = requestedFood > simulation.food + 0.0001;
   const foodConsumed = Math.min(simulation.food, requestedFood);
-  const rationModifier = foodShortage ? -8 : rationMods[ration] ?? 0;
-  const varietyModifier = ration > 0 ? Math.max(0, Math.min(3, Math.trunc(simulation.foodTypes) - 1)) : 0;
+  const foodShortage = requestedFood > simulation.food + 0.0001;
   const taxRule = TAX_RULES[simulation.tax];
   const bribe = simulation.tax.startsWith("bribe-");
   const bribeCost = bribe && simulation.bribeCostPerVillager !== null
     ? simulation.population * simulation.bribeCostPerVillager : 0;
   const bribePaid = bribe && simulation.bribeCostPerVillager !== null && simulation.gold >= bribeCost;
-  const taxModifier = bribe ? bribePaid ? taxRule.popularity : 0 : taxRule.popularity;
-  const goldDelta = bribe ? bribePaid ? -bribeCost : 0 : simulation.population * taxRule.goldPerVillager;
-  const beerCoverage = Math.min(1, simulation.taverns * 30 / Math.max(1, simulation.population));
-  const beerAvailable = simulation.taverns > 0 && simulation.beerBarrels >= 0.144;
-  const beerModifier = !beerAvailable ? 0 : beerCoverage >= 1 ? 8 : beerCoverage >= .75 ? 6 : beerCoverage >= .5 ? 4 : beerCoverage >= .25 ? 2 : 0;
-  const religion = (simulation.churches > 0 ? 1 : 0) + (simulation.cathedrals > 0 ? 2 : 0);
-  const blessings = Math.round(Math.max(0, Math.min(1, simulation.blessedShare)) * 8);
-  const fear = Math.max(-5, Math.min(5, Math.trunc(simulation.fear)));
-  const total = rationModifier + varietyModifier + taxModifier + beerModifier + religion + blessings + fear;
-  const projected = Math.max(0, Math.min(100, simulation.popularity + total));
+  const goldDelta = bribe ? (bribePaid ? -bribeCost : 0) : simulation.population * taxRule.goldPerVillager;
+  const projected = Math.max(0, Math.min(100, simulation.popularity + modifiers.total));
   const army = entities.filter((entity) => entity.kind === "unit" && entity.team === "player");
-  const soldiers = army.reduce((sum, unit) => sum + (unit.count ?? 1), 0);
   const armyByType = new Map<string, number>();
   for (const unit of army) {
     const type = unit.unitClass ?? unit.role;
@@ -1039,28 +1298,41 @@ function renderReports(): void {
   const armyRows = [...armyByType.entries()].map(([type, count]) =>
     '<div class="dialog-row"><span>' + type + '</span><b>' + count + '</b></div>'
   ).join("") || '<p class="dialog-note">Brak jednostek w armii.</p>';
+  const formatModifier = (value: number): string => (value > 0 ? "+" : "") + value;
   const rows = [
-    ["Racje (" + (rationNames[ration] ?? "brak") + ")", rationModifier],
-    ["Różnorodność żywności", varietyModifier],
-    [bribe ? "Łapówki" : "Podatki", taxModifier],
-    ["Piwo", beerModifier],
-    ["Religia · bonus stały", religion],
-    ["Błogosławieństwa", blessings],
-    ["Współczynnik strachu", fear]
-  ].map(([label, value]) => '<div class="dialog-row"><span>' + label + '</span><b>' + (Number(value) > 0 ? "+" : "") + value + '</b></div>').join("");
-  openDialog("KSIĘGA RAPORTÓW", "BILANS POPULARNOŚCI · NASTĘPNY MIESIĄC",
+    ["Racje żywnościowe", modifiers.ration],
+    ["Różnorodność żywności", modifiers.variety],
+    [bribe ? "Łapówki" : "Podatki", modifiers.tax],
+    ["Piwo · obsługa przez gospody", modifiers.beer],
+    ["Religia · bonus stały", modifiers.religionPassive],
+    ["Błogosławieństwa kapłanów", modifiers.blessings],
+    ["Współczynnik strachu", modifiers.fear]
+  ].map(([label, value]) => '<div class="dialog-row"><span>' + label + '</span><b>' + formatModifier(Number(value)) + '</b></div>').join("");
+  const employed = simulation.villagers.filter((villager) => villager.status === "working" || villager.status === "walking-to-work").length;
+  const priests = simulation.villagers.filter((villager) => villager.role === "priest" && villager.status !== "leaving").length;
+  const activeSites = simulation.worksites.filter((site) => site.workerIds.length >= site.requiredWorkers).length;
+  const goodCount = simulation.fearObjects.filter((object) => object.kind === "good").length;
+  const badCount = simulation.fearObjects.filter((object) => object.kind === "bad").length;
+  const rationNames: Record<number, string> = { 0: "Brak", 0.5: "Połowa", 1: "Normalne", 1.5: "Dodatkowe", 2: "Podwójne" };
+  openDialog("KSIĘGA RAPORTÓW", "BILANS POPULARNOŚCI · W NADCHODZĄCYM MIESIĄCU",
     '<div class="dialog-grid">' +
       '<div class="dialog-stat"><small>OBECNA POPULARNOŚĆ</small><b>' + simulation.popularity + '/100</b></div>' +
       '<div class="dialog-stat"><small>PROGNOZA PO NASTĘPNYM TICKU</small><b>' + projected + '/100</b></div>' +
-      '<div class="dialog-stat"><small>POPULACJA</small><b>' + simulation.population + '/' + simulation.housing + '</b></div>' +
-      '<div class="dialog-stat"><small>ARMIA</small><b>' + soldiers + ' żołnierzy</b></div>' +
-      '<div class="dialog-stat"><small>ŻYWNOŚĆ · PRZEWIDYWANE ZUŻYCIE</small><b>' + foodConsumed.toLocaleString("pl-PL") +
-        (foodShortage ? ' · NIEDOBÓR' : '') + '</b></div>' +
-      '<div class="dialog-stat"><small>ZŁOTO · BILANS Z PODATKÓW</small><b>' + (goldDelta > 0 ? '+' : '') +
-        goldDelta.toLocaleString("pl-PL") + '</b></div>' +
+      '<div class="dialog-stat"><small>MIESZKAŃCY / MIEJSCA</small><b>' + simulation.population + '/' + simulation.housing + '</b></div>' +
+      '<div class="dialog-stat"><small>BEZROBOTNI PRZY OGNISKU</small><b>' + simulation.unemployed + '/24</b></div>' +
+      '<div class="dialog-stat"><small>PRACUJĄCY / MIEJSCA PRACY</small><b>' + employed + ' / ' + simulation.worksites.reduce((sum, site) => sum + site.requiredWorkers, 0) + '</b></div>' +
+      '<div class="dialog-stat"><small>KAPŁANI / BŁOGOSŁAWIEŃSTWA</small><b>' + priests + ' / ' + Math.round(simulation.blessedShare * 100) + '%</b></div>' +
+      '<div class="dialog-stat"><small>ŻYWNOŚĆ · RACJE ' + (rationNames[ration] ?? "brak") + '</small><b>' + foodConsumed.toLocaleString("pl-PL") + (foodShortage ? ' · NIEDOBÓR' : '') + '</b></div>' +
+      '<div class="dialog-stat"><small>ZŁOTO · BILANS Z PODATKÓW</small><b>' + (goldDelta > 0 ? '+' : '') + goldDelta.toLocaleString("pl-PL") + '</b></div>' +
     '</div><h3>Składniki popularności</h3>' + rows +
+    '<h3>Praca i strach</h3>' +
+    '<div class="dialog-row"><span>Obsadzone miejsca pracy</span><b>' + activeSites + '/' + simulation.worksites.length + '</b></div>' +
+    '<div class="dialog-row"><span>Dobre rzeczy / złe rzeczy</span><b>' + goodCount + ' / ' + badCount + '</b></div>' +
+    '<div class="dialog-row"><span>Poziom strachu</span><b>' + formatModifier(simulation.fear) + '/5</b></div>' +
+    '<div class="dialog-row"><span>Wydajność pracy</span><b>' + Math.round(getFearWorkMultiplier(simulation.fear) * 100) + '%</b></div>' +
+    '<div class="dialog-row"><span>Mnożnik obrażeń własnego wojska</span><b>' + Math.round(getFearDamageMultiplier(simulation.fear) * 100) + '%</b></div>' +
     '<h3>Stan armii · według typów</h3>' + armyRows +
-    '<p class="dialog-note">Prognoza zakłada, że obecne ustawienia i dostępność zasobów nie zmienią się przed rozliczeniem. Koszt łapówek nie jest określony w specyfikacji, więc ich bonus pozostaje zerowy, dopóki koszt nie zostanie skonfigurowany.</p>');
+    '<p class="dialog-note">Przyrost ludności zatrzymuje się przy popularności poniżej 50, braku miejsca albo 24 bezrobotnych przy ognisku. Żołnierze nie zajmują miejsc mieszkalnych i nie zużywają racji. Koszt łapówek pozostaje nieaktywny, dopóki nie zostanie skonfigurowany.</p>');
 }
 
 function openRanking(): void {
@@ -1164,6 +1436,18 @@ function renderMinimap(): void {
     if (entity.team === "enemy") cell.glyph = "●";
     else if (entity.kind === "unit") cell.glyph = "●";
     else cell.glyph = "■";
+  }
+  for (const villager of simulation.villagers) {
+    if (villager.status === "leaving") continue;
+    const tile = worldToCell(world.grid, villager);
+    if (!tile) continue;
+    const miniCol = Math.max(0, Math.min(size - 1, Math.floor(tile.col / 4)));
+    const miniRow = Math.max(0, Math.min(size - 1, Math.floor(tile.row / 4)));
+    const cell = cells[miniRow * size + miniCol];
+    if (cell && !["player", "enemy", "friendly-building"].includes(cell.owner ?? "")) {
+      cell.owner = "villager";
+      cell.glyph = "♟";
+    }
   }
   minimapGrid.innerHTML = cells.map((cell) =>
     '<span class="mini-cell ' + cell.terrain + (cell.owner ? " " + cell.owner : "") + '">' + cell.glyph + '</span>'
@@ -1377,6 +1661,7 @@ function saveGame(): void {
       placedStructures: [...placedStructures.entries()].map(([id, cost]) => [id, { ...cost }]),
       undoStack: [...undoStack],
       towerCounter,
+      townBuildingCounter,
       camera: captureCamera(),
       cameraBookmarks: [...cameraBookmarks.entries()].map(([number, bookmark]) => [number, { ...bookmark }]),
       lastCameraBeforeJump: lastCameraBeforeJump ? { ...lastCameraBeforeJump } : null,
@@ -1416,7 +1701,7 @@ function loadGame(): void {
   const numericFields = [
     "month", "speed", "monthProgress", "gold", "food", "wood", "stone", "popularity",
     "population", "housing", "unemployed", "foodTypes", "taverns", "beerBarrels",
-    "churches", "cathedrals", "blessedShare", "fear"
+    "churches", "cathedrals", "blessedShare", "fear", "spawnProgress", "elapsedSeconds", "nextVillagerId"
   ];
   if (!numericFields.every((field) => typeof savedSimulation[field] === "number" && Number.isFinite(savedSimulation[field])) ||
       ![0, 0.5, 1, 1.5, 2].includes(Number(savedSimulation.ration)) ||
@@ -1437,7 +1722,8 @@ function loadGame(): void {
   const allowedBaseIds = new Set(["keep", "barracks", "mill", "storehouse", "guard", "archers", "riders", "raiders"]);
   const savedRecords = parsed.entities.filter((entry): entry is Record<string, unknown> =>
     isRecord(entry) && typeof entry.id === "string" &&
-    (allowedBaseIds.has(entry.id) || /^watchtower-\d+$/.test(entry.id)) &&
+    (allowedBaseIds.has(entry.id) || /^watchtower-\d+$/.test(entry.id) || /^hovel-\d+$/.test(entry.id) ||
+      /^(chapel|church|cathedral|inn)-\d+$/.test(entry.id) || /^fear-(good|bad)-\d+$/.test(entry.id)) &&
     typeof entry.x === "number" && Number.isFinite(entry.x) &&
     typeof entry.y === "number" && Number.isFinite(entry.y) &&
     typeof entry.health === "number" && Number.isFinite(entry.health)
@@ -1447,12 +1733,36 @@ function loadGame(): void {
     return;
   }
 
+  if (Array.isArray(savedSimulation.villagers)) {
+    if (savedSimulation.villagers.length > 200 || !savedSimulation.villagers.every((entry) =>
+      isRecord(entry) && typeof entry.id === "string" && typeof entry.x === "number" && Number.isFinite(entry.x) &&
+      typeof entry.y === "number" && Number.isFinite(entry.y) &&
+      ["idle", "walking-to-work", "working", "leaving"].includes(String(entry.status)) &&
+      ["laborer", "priest"].includes(String(entry.role)) && typeof entry.blessedUntil === "number" &&
+      Array.isArray(entry.movementQueue))) {
+      closeDialog(); setStatus("Zapis zawiera nieprawidłową listę mieszkańców."); return;
+    }
+  }
+  if (Array.isArray(savedSimulation.worksites) && !savedSimulation.worksites.every((entry) =>
+    isRecord(entry) && typeof entry.id === "string" && typeof entry.x === "number" && typeof entry.y === "number" &&
+    typeof entry.requiredWorkers === "number" && Array.isArray(entry.workerIds))) {
+    closeDialog(); setStatus("Zapis zawiera nieprawidłowe miejsca pracy."); return;
+  }
+  if (Array.isArray(savedSimulation.fearObjects) && !savedSimulation.fearObjects.every((entry) =>
+    isRecord(entry) && typeof entry.id === "string" && (entry.kind === "good" || entry.kind === "bad") &&
+    typeof entry.x === "number" && typeof entry.y === "number")) {
+    closeDialog(); setStatus("Zapis zawiera nieprawidłowe obiekty strachu."); return;
+  }
+
   // Recreate the deterministic world, then apply the saved state to its entities.
+  for (const glyph of villagerViews.values()) glyph.destroy();
+  villagerViews.clear();
   for (const child of worldRoot.removeChildren()) child.destroy({ children: true });
   const freshWorld = createWorld(worldRoot);
   world.layers = freshWorld.layers;
   world.grid = freshWorld.grid;
   world.setFlattened = freshWorld.setFlattened;
+  createCampfireVisuals();
   selectionMarkers.clear();
   selectedIds.clear();
   placedStructures.clear();
@@ -1460,6 +1770,7 @@ function loadGame(): void {
   controlGroups.clear();
   cameraBookmarks.clear();
   towerCounter = 0;
+  townBuildingCounter = 0;
 
   const baseById = new Map(freshWorld.entities.map((entity) => [entity.id, entity]));
   const restoredEntities: GameEntity[] = [];
@@ -1470,6 +1781,16 @@ function loadGame(): void {
       const suffix = Number(id.slice("watchtower-".length));
       entity = createWatchtower(freshWorld.layers.structures, Number(record.x), Number(record.y), suffix);
       towerCounter = Math.max(towerCounter, suffix);
+    }
+    if (!entity && (/^hovel-\d+$/.test(id) || /^(chapel|church|cathedral|inn)-\d+$/.test(id) || /^fear-(good|bad)-\d+$/.test(id))) {
+      const match = id.match(/^(fear-(?:good|bad)|hovel|chapel|church|cathedral|inn)-(\d+)$/);
+      if (match) {
+        const prefix = match[1]!;
+        const suffix = Number(match[2]);
+        const type: TownBuildingType = prefix === "fear-good" ? "good" : prefix === "fear-bad" ? "bad" : prefix as TownBuildingType;
+        entity = createTownBuilding(freshWorld.layers.structures, type, suffix, Number(record.x), Number(record.y));
+        townBuildingCounter = Math.max(townBuildingCounter, suffix);
+      }
     }
     if (!entity) continue;
     entity.x = Number(record.x);
@@ -1496,16 +1817,39 @@ function loadGame(): void {
   }
   entities.splice(0, entities.length, ...restoredEntities);
 
+  const legacyCivilianSave = !Array.isArray(savedSimulation.villagers);
   Object.assign(simulation, savedSimulation);
+  if (legacyCivilianSave) {
+    const defaults = createSimulation();
+    simulation.villagers = defaults.villagers;
+    simulation.worksites = defaults.worksites;
+    simulation.fearObjects = [];
+    simulation.spawnProgress = 0;
+    simulation.elapsedSeconds = 0;
+    simulation.nextVillagerId = defaults.nextVillagerId;
+    syncPopulationCounters(simulation);
+  }
+  if (!Array.isArray(simulation.worksites)) simulation.worksites = [];
+  if (!Array.isArray(simulation.fearObjects)) simulation.fearObjects = [];
+  if (!Array.isArray(simulation.villagers)) simulation.villagers = createSimulation().villagers;
+  if (legacyCivilianSave) assignAvailableWorkers(simulation);
+  syncPopulationCounters(simulation);
   towerCounter = Math.max(towerCounter, typeof parsed.towerCounter === "number" ? parsed.towerCounter : 0);
+  townBuildingCounter = Math.max(townBuildingCounter, typeof parsed.townBuildingCounter === "number" ? parsed.townBuildingCounter : 0);
 
   if (Array.isArray(parsed.placedStructures)) {
     for (const entry of parsed.placedStructures) {
       if (!Array.isArray(entry) || typeof entry[0] !== "string" || !restoredIds.has(entry[0]) || !isRecord(entry[1])) continue;
-      const { wood: savedWood, stone: savedStone } = entry[1];
+      const { wood: savedWood, stone: savedStone, gold: savedGold, housing: savedHousing, worksiteId, fearObjectId } = entry[1];
       if (typeof savedWood === "number" && Number.isFinite(savedWood) &&
           typeof savedStone === "number" && Number.isFinite(savedStone)) {
-        placedStructures.set(entry[0], { wood: Math.max(0, savedWood), stone: Math.max(0, savedStone) });
+        placedStructures.set(entry[0], {
+          wood: Math.max(0, savedWood), stone: Math.max(0, savedStone),
+          gold: typeof savedGold === "number" && Number.isFinite(savedGold) ? Math.max(0, savedGold) : 0,
+          ...(typeof savedHousing === "number" ? { housing: savedHousing } : {}),
+          ...(typeof worksiteId === "string" ? { worksiteId } : {}),
+          ...(typeof fearObjectId === "string" ? { fearObjectId } : {})
+        });
       }
     }
   }
@@ -1556,6 +1900,7 @@ function loadGame(): void {
   if (populationLabel) populationLabel.textContent = simulation.population + "/" + simulation.housing;
   if (popularityLabel) popularityLabel.textContent = String(simulation.popularity);
   updateSelection();
+  updateVillagerVisuals(0);
   renderMinimap();
   closeDialog();
   setStatus("Wczytano zapis z " + (typeof parsed.savedAt === "string" ? parsed.savedAt : "nieznanej daty") + ".");
@@ -1799,7 +2144,8 @@ function updateCombat(deltaSeconds: number): void {
       unit.movementQueue = [];
       unit.attackCooldown = Math.max(0, (unit.attackCooldown ?? 0) - deltaSeconds);
       if (unit.attackCooldown === 0) {
-        target.health -= unit.attackDamage ?? 9;
+        const fearDamage = unit.team === "player" ? getFearDamageMultiplier(simulation.fear) : 1;
+        target.health -= (unit.attackDamage ?? 9) * fearDamage;
         unit.attackCooldown = 0.85;
         if (target.health <= 0) defeated.push(target);
       }
@@ -1848,8 +2194,14 @@ app.ticker.add((ticker) => {
     minimapRefresh = 0;
     renderMinimap();
   }
-  if (paused) return;
+  if (paused) { updateVillagerVisuals(0); return; }
+  const populationBeforeTick = simulation.population;
   const reports = advanceSimulation(simulation, deltaSeconds);
+  updateVillagerVisuals(deltaSeconds);
+  if (simulation.population !== populationBeforeTick && reports.length === 0) {
+    const change = simulation.population > populationBeforeTick ? "Nowy mieszkaniec dotarł do ogniska." : "Mieszkaniec opuścił zamek.";
+    setStatus(change + " Ludność: " + simulation.population + "/" + simulation.housing + ", bezrobotni: " + simulation.unemployed + ".");
+  }
   if (reports.length) {
     const latest = reports[reports.length - 1]!;
     setResources();
@@ -1860,7 +2212,8 @@ app.ticker.add((ticker) => {
     if (populationLabel) populationLabel.textContent = `${simulation.population}/${simulation.housing}`;
     if (popularityLabel) { popularityLabel.textContent = String(simulation.popularity); popularityLabel.style.color = simulation.popularity >= 50 ? "#64c982" : "#f06c65"; }
     updateScribe();
-    setStatus(`Rozliczenie miesiąca ${latest.month - 1}: żywność −${latest.foodConsumed.toFixed(2)}, złoto ${latest.taxes >= 0 ? "+" : ""}${latest.taxes.toFixed(1)}${latest.bribeCost ? `, łapówka −${latest.bribeCost.toFixed(1)}` : ""}, popularność ${latest.popularityChange >= 0 ? "+" : ""}${latest.popularityChange}.`);
+    updateVillagerVisuals(0);
+    setStatus(`Rozliczenie miesiąca ${latest.month - 1}: żywność −${latest.foodConsumed.toFixed(2)}, złoto ${latest.taxes >= 0 ? "+" : ""}${latest.taxes.toFixed(1)}${latest.bribeCost ? `, łapówka −${latest.bribeCost.toFixed(1)}` : ""}, popularność ${latest.popularityChange >= 0 ? "+" : ""}${latest.popularityChange}. ${latest.messages.join(" ")}`);
   }
   updateCombat(deltaSeconds);
   for (const entity of entities) {
@@ -1880,6 +2233,7 @@ if (initialMonth) initialMonth.textContent = `M${simulation.month}`;
 if (initialPopulation) initialPopulation.textContent = `${simulation.population}/${simulation.housing}`;
 if (initialPopularity) initialPopularity.textContent = String(simulation.popularity);
 renderBuildCategory();
+updateVillagerVisuals(0);
 renderMinimap();
 updateScribe();
 window.addEventListener("resize", () => {

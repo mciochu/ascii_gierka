@@ -300,3 +300,7 @@ button:disabled { opacity: .38; cursor: not-allowed !important; }
 .stance-controls button:hover { border-color: #b99a58; color: #f0d58e; background: #18150e; }
 .dialog-content select { width: 100%; margin-top: 5px; padding: 7px 8px; border: 1px solid #354149; background: #090f12; color: #d9e0e3; font: 8px var(--mono); }
 .mini-cell.friendly-building { color: #e4c47a; }
+
+.scribe-metrics em { color: #8bcf91; font: 5px var(--mono); font-style: normal; letter-spacing: .02em; }
+
+.mini-cell.villager { color: #80d688; font-weight: 700; opacity: 1; }

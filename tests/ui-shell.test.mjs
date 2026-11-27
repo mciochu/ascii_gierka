@@ -79,3 +79,28 @@ test("liczebność portretu typu uwzględnia licznik żołnierzy w grupie", () =
 test("wybór aktywnej budowli w pauzie nie sugeruje wejścia w tryb budowania", () => {
   assert.match(main, /if \(item\.implemented && paused\)[\s\S]*?rozpocząć budowanie/);
 });
+
+test("etap 3 renderuje ognisko, licznik bezrobotnych i wskaźnik przyrostu", () => {
+  assert.match(main, /createCampfireVisuals\(\)/);
+  assert.match(main, /campfireLabel\.text = simulation\.unemployed \+ "\/24/);
+  assert.match(main, /simulation\.spawnProgress/);
+  assert.match(html, /id="scribe-unemployed"/);
+});
+
+test("etap 3 ma działającą budowę chat, religii i obiektów strachu", () => {
+  for (const id of ["hovel", "chapel", "church", "cathedral", "inn", "good-things", "bad-things"]) {
+    assert.match(main, new RegExp('"' + id + '"'));
+  }
+  assert.match(main, /function placeTownBuilding/);
+  assert.match(main, /addWorksite\(simulation/);
+  assert.match(main, /simulation\.fearObjects\.push/);
+  assert.match(main, /setHovelCapacity\(simulation, 1\)/);
+});
+
+test("zapis obejmuje mieszkańców, miejsca pracy, obiekty strachu i nowe budowle", () => {
+  assert.match(main, /simulation: \{ \.\.\.simulation \}/);
+  assert.match(main, /townBuildingCounter/);
+  assert.match(main, /savedSimulation\.villagers/);
+  assert.match(main, /savedSimulation\.worksites/);
+  assert.match(main, /savedSimulation\.fearObjects/);
+});

@@ -26,12 +26,15 @@ test("katalog zawiera rozpoznawalne pozycje każdej kategorii Stronghold", () =>
   assert.equal(allItems.size, 52);
 });
 
-test("tylko działająca wieża strażnicza jest oznaczona jako dostępna", () => {
+test("budowle etapu 3 są aktywne razem z wieżą strażniczą", () => {
   const enabled = BUILD_CATEGORIES.flatMap((category) => category.items)
     .filter((item) => item.implemented)
     .map((item) => item.id);
-  assert.deepEqual(enabled, ["watchtower"]);
+  assert.deepEqual(enabled, ["watchtower", "hovel", "chapel", "church", "cathedral", "good-things", "bad-things", "inn"]);
   assert.equal(findBuildItem("watchtower")?.cost, "70 drewna · 30 kamienia");
+  assert.equal(findBuildItem("hovel")?.cost, "6 drewna · +8 miejsc");
+  assert.equal(findBuildItem("church")?.implemented, true);
+  assert.equal(findBuildItem("inn")?.cost, "20 drewna · 100 złota · 1 karczmarz");
   assert.equal(findBuildItem("market")?.implemented, undefined);
 });
 

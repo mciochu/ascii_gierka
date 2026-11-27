@@ -265,19 +265,36 @@ function visibleWorldBounds(): { left: number; top: number; right: number; botto
   };
 }
 
-function selectBox(rect: { left: number; top: number; right: number; bottom: number }, additive: boolean, toggle: boolean): void {
-  const box = {
-    left: Math.min(rect.left, rect.right),
-    right: Math.max(rect.left, rect.right),
-    top: Math.min(rect.top, rect.bottom),
-    bottom: Math.max(rect.top, rect.bottom)
+function selectBox(polygon: { x: number; y: number }[], additive: boolean, toggle: boolean): void {
+  if (polygon.length < 3) return;
+  const xs = polygon.map((point) => point.x);
+  const ys = polygon.map((point) => point.y);
+  const bounds = {
+    left: Math.min(...xs),
+    right: Math.max(...xs),
+    top: Math.min(...ys),
+    bottom: Math.max(...ys)
   };
+
+  const contains = (x: number, y: number): boolean => {
+    let inside = false;
+    for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
+      const current = polygon[index]!;
+      const prior = polygon[previous]!;
+      const intersects = ((current.y > y) !== (prior.y > y)) &&
+        (x < ((prior.x - current.x) * (y - current.y)) / (prior.y - current.y) + current.x);
+      if (intersects) inside = !inside;
+    }
+    return inside;
+  };
+
   const hits = entities.filter((entity) =>
     entity.kind === "unit" &&
     entity.team === "player" &&
     entity.health > 0 &&
-    entity.x >= box.left && entity.x <= box.right &&
-    entity.y >= box.top && entity.y <= box.bottom
+    entity.x >= bounds.left && entity.x <= bounds.right &&
+    entity.y >= bounds.top && entity.y <= bounds.bottom &&
+    contains(entity.x, entity.y)
   );
 
   if (!additive && !toggle) selectedIds.clear();
@@ -287,10 +304,9 @@ function selectBox(rect: { left: number; top: number; right: number; bottom: num
   }
   updateSelection();
   setStatus(hits.length
-    ? `Zaznaczono ${hits.length} oddziałów. Kliknij prawym przyciskiem, aby wydać rozkaz.`
+    ? "Zaznaczono " + hits.length + " oddziałów. Kliknij prawym przyciskiem, aby wydać rozkaz."
     : additive || toggle ? "Nie znaleziono kolejnych oddziałów w zaznaczonym obszarze." : "Pusty obszar — zaznaczenie wyczyszczone.");
 }
-
 function selectClickedEntity(entity: GameEntity, additive: boolean, toggle: boolean): void {
   if (toggle) {
     toggleSelection(entity);
@@ -591,11 +607,13 @@ function finishPointer(event: PointerEvent): void {
   if (session.moved && mode === "select") {
     const start = screenToWorld(session.startX, session.startY);
     const end = screenToWorld(event.clientX, event.clientY);
-    selectBox(
-      { left: start.x, top: start.y, right: end.x, bottom: end.y },
-      session.additive,
-      session.toggle
-    );
+    const polygon = [
+      start,
+      screenToWorld(event.clientX, session.startY),
+      end,
+      screenToWorld(session.startX, event.clientY)
+    ];
+    selectBox(polygon, session.additive, session.toggle);
   } else {
     handleLeftClick(event.clientX, event.clientY, session.additive, session.toggle);
   }

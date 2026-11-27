@@ -35,27 +35,33 @@ export interface WorldPoint {
 
 const COLUMNS = 100;
 const ROWS = 100;
-const TILE_WIDTH = 64;
-const TILE_HEIGHT = 32;
-const HEIGHT_STEP = 18;
-const ROW_ORIGIN = 41;
+const TILE_WIDTH = 26;
+const TILE_HEIGHT = 18;
+const HEIGHT_STEP = 3;
+const ROW_ORIGIN = ROWS - 1;
 const HALF_TILE_X = TILE_WIDTH / 2;
 const HALF_TILE_Y = TILE_HEIGHT / 2;
+export const GRID_PIVOT = {
+  x: HALF_TILE_X * (COLUMNS - 1),
+  y: HALF_TILE_Y * (ROWS - 1)
+};
 
 const WATER_PATH: WorldPoint[] = [
-  { x: 1700, y: 90 },
-  { x: 1810, y: 225 },
-  { x: 1940, y: 330 },
-  { x: 2070, y: 445 },
-  { x: 2180, y: 585 },
-  { x: 2380, y: 780 }
+  { x: 1350, y: 180 },
+  { x: 1450, y: 300 },
+  { x: 1580, y: 430 },
+  { x: 1720, y: 580 },
+  { x: 1840, y: 760 },
+  { x: 1920, y: 930 },
+  { x: 1850, y: 1110 },
+  { x: 1710, y: 1270 }
 ];
 
 const FORESTS = [
-  { x: 390, y: 390, rx: 245, ry: 180 },
-  { x: 2060, y: 1305, rx: 245, ry: 200 },
-  { x: 2200, y: 550, rx: 170, ry: 140 },
-  { x: 580, y: 1510, rx: 185, ry: 140 }
+  { x: 900, y: 500, rx: 140, ry: 105 },
+  { x: 1900, y: 930, rx: 155, ry: 110 },
+  { x: 1180, y: 1160, rx: 125, ry: 95 },
+  { x: 1700, y: 1410, rx: 145, ry: 115 }
 ];
 
 function hash(col: number, row: number): number {
@@ -103,7 +109,7 @@ function terrainAt(point: WorldPoint, col: number, row: number): Pick<GridTile, 
     return { terrain: "forest", elevation: 1, walkable: true, buildable: false };
   }
 
-  if (inEllipse(point, { x: 480, y: 1190, rx: 205, ry: 115 }) ||
+  if (inEllipse(point, { x: 600, y: 1170, rx: 180, ry: 105 }) ||
       inEllipse(point, { x: 1030, y: 1370, rx: 205, ry: 135 })) {
     return { terrain: "oasis", elevation: 0, walkable: true, buildable: true };
   }
@@ -116,7 +122,7 @@ function terrainAt(point: WorldPoint, col: number, row: number): Pick<GridTile, 
     return { terrain: "iron", elevation: 1, walkable: true, buildable: false };
   }
 
-  if (inEllipse(point, { x: 865, y: 480, rx: 130, ry: 82 })) {
+  if (inEllipse(point, { x: 660, y: 900, rx: 105, ry: 78 })) {
     return { terrain: "tar", elevation: 0, walkable: true, buildable: false };
   }
 
@@ -139,7 +145,7 @@ export function createWorldGrid(): WorldGrid {
     for (let col = 0; col < COLUMNS; col += 1) {
       const base = {
         x: HALF_TILE_X * (col - row + ROW_ORIGIN),
-        y: HALF_TILE_Y * (col + row - ROW_ORIGIN)
+        y: HALF_TILE_Y * (col + row)
       };
       const terrain = terrainAt(base, col, row);
       tiles.push({ col, row, ...terrain });
@@ -164,14 +170,16 @@ export function worldPositionForCell(grid: WorldGrid, col: number, row: number):
   const tile = tileAt(grid, col, row);
   if (!tile) return null;
   return {
-    x: HALF_TILE_X * (col - row + ROW_ORIGIN),
-    y: HALF_TILE_Y * (col + row - ROW_ORIGIN) - tile.elevation * grid.heightStep
+    x: (grid.tileWidth / 2) * (col - row + ROW_ORIGIN),
+    y: (grid.tileHeight / 2) * (col + row) - tile.elevation * grid.heightStep
   };
 }
 
 export function worldToCell(grid: WorldGrid, point: WorldPoint): GridTile | null {
-  const roughCol = Math.round((point.x / HALF_TILE_X + point.y / HALF_TILE_Y) / 2);
-  const roughRow = Math.round(ROW_ORIGIN + (point.y / HALF_TILE_Y - point.x / HALF_TILE_X) / 2);
+  const halfWidth = grid.tileWidth / 2;
+  const halfHeight = grid.tileHeight / 2;
+  const roughCol = Math.round(((point.x / halfWidth - ROW_ORIGIN) + point.y / halfHeight) / 2);
+  const roughRow = Math.round((point.y / halfHeight - (point.x / halfWidth - ROW_ORIGIN)) / 2);
   let nearest: GridTile | null = null;
   let nearestDistance = Infinity;
   for (let row = roughRow - 4; row <= roughRow + 4; row += 1) {
@@ -180,8 +188,13 @@ export function worldToCell(grid: WorldGrid, point: WorldPoint): GridTile | null
       if (!tile) continue;
       const center = worldPositionForCell(grid, col, row);
       if (!center) continue;
-      const distance = (center.x - point.x) ** 2 + (center.y - point.y) ** 2;
-      if (distance < nearestDistance) {
+      const dx = Math.abs(center.x - point.x);
+      const dy = Math.abs(center.y - point.y);
+      // A point belongs to a diamond tile only while inside its projected footprint.
+      if (dx / halfWidth + dy / halfHeight > 1) continue;
+      const distance = dx * dx + dy * dy;
+      if (distance < nearestDistance ||
+          (distance === nearestDistance && tile.elevation > (nearest?.elevation ?? -Infinity))) {
         nearest = tile;
         nearestDistance = distance;
       }
@@ -285,4 +298,30 @@ export function rotateOffset(point: WorldPoint, quarterTurns: number): WorldPoin
   if (turns === 2) return { x: -point.x, y: -point.y };
   if (turns === 3) return { x: point.y, y: -point.x };
   return { x: point.x, y: point.y };
+}
+
+
+export interface MapCameraTransform {
+  position: WorldPoint;
+  pivot: WorldPoint;
+  zoom: number;
+  quarterTurns: number;
+}
+
+/** Convert world coordinates to canvas-local screen coordinates for a rotated map camera. */
+export function worldToViewport(point: WorldPoint, camera: MapCameraTransform): WorldPoint {
+  const offset = rotateOffset({
+    x: (point.x - camera.pivot.x) * camera.zoom,
+    y: (point.y - camera.pivot.y) * camera.zoom
+  }, camera.quarterTurns);
+  return { x: camera.position.x + offset.x, y: camera.position.y + offset.y };
+}
+
+/** Inverse of worldToViewport; used for hit testing, selection and world-space commands. */
+export function viewportToWorld(point: WorldPoint, camera: MapCameraTransform): WorldPoint {
+  const offset = rotateOffset({
+    x: (point.x - camera.position.x) / camera.zoom,
+    y: (point.y - camera.position.y) / camera.zoom
+  }, -camera.quarterTurns);
+  return { x: camera.pivot.x + offset.x, y: camera.pivot.y + offset.y };
 }

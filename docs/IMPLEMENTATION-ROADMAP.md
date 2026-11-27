@@ -195,5 +195,3 @@ Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
 - Mnożnik wydajności pracy jest udostępniony i raportowany; jego wpływ na ilość przetwarzanych towarów zostanie włączony wraz z łańcuchami produkcji w etapie 4.
 - `recruitFromCampfire` realizuje zużycie bezrobotnego, natomiast pełny panel rekrutacji, typy jednostek, ceny i pobieranie uzbrojenia należą do etapu 5.
 - Rzeczywista liczebność mieszkańców jest rozdzielona od żołnierzy; żołnierze nie płacą podatków i nie zużywają racji.
-
-[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

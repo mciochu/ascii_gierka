@@ -243,5 +243,3 @@ test('prędkość jest ograniczona do 20–90, a miesiąc nalicza się po 30 sek
   assert.equal(advanceSimulation(state, 1).length, 1);
   assert.equal(state.month, 2);
 });
-
-[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

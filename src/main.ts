@@ -635,6 +635,18 @@ document.querySelector<HTMLButtonElement>("#pause-button")?.addEventListener("cl
   }
   setStatus(paused ? "Symulacja zatrzymana." : "Symulacja wznowiona.");
 });
+document.querySelector<HTMLSelectElement>("#ration-select")?.addEventListener("change", (event) => {
+  const value = Number((event.currentTarget as HTMLSelectElement).value);
+  if ([0, 0.5, 1, 1.5, 2].includes(value)) {
+    simulation.ration = value as 0 | 0.5 | 1 | 1.5 | 2;
+    setStatus("Zmieniono poziom racji. Nowe zużycie i wpływ na popularność zostaną rozliczone w kolejnym miesiącu.");
+  }
+});
+document.querySelector<HTMLSelectElement>("#tax-select")?.addEventListener("change", (event) => {
+  simulation.tax = (event.currentTarget as HTMLSelectElement).value as typeof simulation.tax;
+  setStatus("Zmieniono politykę podatkową. Bilans zostanie rozliczony w kolejnym miesiącu.");
+});
+
 function updateSpeedLabel(): void {
   const label = document.querySelector<HTMLElement>("#speed-value");
   if (label) label.textContent = String(simulation.speed);

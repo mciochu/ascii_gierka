@@ -200,3 +200,8 @@ button:focus-visible { outline: 1px solid var(--blue); outline-offset: 3px; }
 .speed-controls b { min-width:18px; text-align:center; font:10px var(--mono); color:#e4e9ec; }
 @media (max-width: 1100px) { .sim-clock { display:none; } }
 @media (max-width: 760px) { .speed-controls { gap:2px; padding:2px; } .speed-controls button { width:17px; height:18px; } }
+
+.economy-section { padding:17px 0 16px; border-bottom:1px solid #242b30; }
+.economy-control { display:flex; flex-direction:column; gap:6px; margin:9px 0; color:#aab4ba; font:8px var(--mono); }
+.economy-control select { width:100%; min-width:0; border:1px solid #303a40; background:#0d1215; color:#dce3e6; padding:8px; font:8px var(--mono); }
+.economy-control select:focus { outline:1px solid #70c4fa; }

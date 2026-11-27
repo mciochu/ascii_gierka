@@ -720,6 +720,9 @@ function updateCombat(deltaSeconds: number): void {
     const target = findTarget(unit.attackTargetId);
     if (!target) {
       unit.attackTargetId = undefined;
+      if (unit.attackMoveTarget && !unit.moveTarget) {
+        unit.moveTarget = { ...unit.attackMoveTarget };
+      }
       continue;
     }
 

@@ -191,3 +191,12 @@ button:focus-visible { outline: 1px solid var(--blue); outline-offset: 3px; }
   .map-statusbar { padding: 0 7px; font-size: 6px; }
   .map-statusbar > span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 }
+
+.sim-clock { display:flex; align-items:center; gap:12px; color:#849097; font:8px var(--mono); white-space:nowrap; }
+.sim-clock > b { color:var(--gold); font-size:11px; }
+.sim-clock strong { color:#dce2e5; font-weight:500; }
+.speed-controls { display:flex; align-items:center; gap:6px; border:1px solid #30383e; background:#0b0e10; padding:3px 5px; }
+.speed-controls button { width:20px; height:20px; border:0; background:#171d21; color:#d7c078; cursor:pointer; }
+.speed-controls b { min-width:18px; text-align:center; font:10px var(--mono); color:#e4e9ec; }
+@media (max-width: 1100px) { .sim-clock { display:none; } }
+@media (max-width: 760px) { .speed-controls { gap:2px; padding:2px; } .speed-controls button { width:17px; height:18px; } }

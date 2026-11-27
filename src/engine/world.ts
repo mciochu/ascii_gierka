@@ -1,6 +1,6 @@
 import { Container } from "pixi.js";
 import { addGlyph, addWord } from "./glyph";
-import { createWorldGrid, worldPositionForCell, type WorldGrid } from "./grid";
+import { createWorldGrid, GRID_PIVOT, worldPositionForCell, type WorldGrid } from "./grid";
 
 export type EntityKind = "building" | "unit";
 export type Faction = "player" | "enemy" | "neutral";
@@ -55,6 +55,10 @@ function random(seed: number): () => number {
   };
 }
 
+function insideWorldDiamond(x: number, y: number): boolean {
+  return Math.abs(x - GRID_PIVOT.x) / GRID_PIVOT.x + Math.abs(y - GRID_PIVOT.y) / GRID_PIVOT.y <= 1;
+}
+
 function addTree(parent: Container, x: number, y: number, scale: number, seed: number): void {
   const rand = random(seed);
   const canopy = ["♣", "♧", "♠", "❧"];
@@ -63,17 +67,20 @@ function addTree(parent: Container, x: number, y: number, scale: number, seed: n
   for (let i = 0; i < count; i += 1) {
     const angle = rand() * Math.PI * 2;
     const radius = rand() * 17 * scale;
+    const leafX = x + Math.cos(angle) * radius;
+    const leafY = y + Math.sin(angle) * radius;
+    if (!insideWorldDiamond(leafX, leafY)) continue;
     addGlyph(parent, {
       char: canopy[Math.floor(rand() * canopy.length)] ?? "♣",
-      x: x + Math.cos(angle) * radius,
-      y: y + Math.sin(angle) * radius,
+      x: leafX,
+      y: leafY,
       size: (18 + rand() * 13) * scale,
       color: greens[Math.floor(rand() * greens.length)] ?? "#547c50",
       alpha: 0.78 + rand() * 0.2,
       rotation: (rand() - 0.5) * 0.35
     });
   }
-  addGlyph(parent, {
+  if (insideWorldDiamond(x, y + 15 * scale)) addGlyph(parent, {
     char: "│",
     x: x + (rand() - 0.5) * 5,
     y: y + 15 * scale,
@@ -82,10 +89,12 @@ function addTree(parent: Container, x: number, y: number, scale: number, seed: n
     alpha: 0.8
   });
   if (rand() > 0.48) {
-    addGlyph(parent, {
+    const dotX = x + (rand() - 0.5) * 35 * scale;
+    const dotY = y + (rand() - 0.5) * 32 * scale;
+    if (insideWorldDiamond(dotX, dotY)) addGlyph(parent, {
       char: "·",
-      x: x + (rand() - 0.5) * 35 * scale,
-      y: y + (rand() - 0.5) * 32 * scale,
+      x: dotX,
+      y: dotY,
       size: 10 * scale,
       color: "#66c96f",
       alpha: 0.85
@@ -106,6 +115,7 @@ function addForest(parent: Container, centerX: number, centerY: number, radiusX:
   for (let i = 0; i < 16; i += 1) {
     const x = centerX + (rand() - 0.5) * radiusX * 2.4;
     const y = centerY + (rand() - 0.5) * radiusY * 2.4;
+    if (!insideWorldDiamond(x, y)) continue;
     addGlyph(parent, {
       char: ["·", "⁙", "‚", "˙"][Math.floor(rand() * 4)] ?? "·",
       x,
@@ -125,10 +135,13 @@ function addQuadraticPath(parent: Container, start: { x: number; y: number }, co
     const x = inverse * inverse * start.x + 2 * inverse * t * control.x + t * t * end.x;
     const y = inverse * inverse * start.y + 2 * inverse * t * control.y + t * t * end.y;
     const spread = (rand() - 0.5) * 23;
+    const pointX = x + spread;
+    const pointY = y + (rand() - 0.5) * 18;
+    if (!insideWorldDiamond(pointX, pointY)) continue;
     addGlyph(parent, {
       char: ["·", "⸱", "∙", "╌", "‚"][Math.floor(rand() * 5)] ?? "·",
-      x: x + spread,
-      y: y + (rand() - 0.5) * 18,
+      x: pointX,
+      y: pointY,
       size: 10 + rand() * 8,
       color: rand() > 0.5 ? "#9a6b45" : "#c08a55",
       alpha: 0.42 + rand() * 0.25
@@ -138,27 +151,53 @@ function addQuadraticPath(parent: Container, start: { x: number; y: number }, co
 
 function addRiver(parent: Container): void {
   const rand = random(8071);
-  for (let i = 0; i < 105; i += 1) {
-    const t = i / 104;
-    const x = 1720 + t * 610 + Math.sin(t * 8) * 68;
-    const y = 130 + t * 540 + Math.sin(t * 5.5) * 44;
-    const spread = (rand() - 0.5) * 125;
+  const course = [
+    { x: 1350, y: 180 },
+    { x: 1450, y: 300 },
+    { x: 1580, y: 430 },
+    { x: 1720, y: 580 },
+    { x: 1840, y: 760 },
+    { x: 1920, y: 930 },
+    { x: 1850, y: 1110 },
+    { x: 1710, y: 1270 }
+  ];
+  const pointAt = (progress: number): { x: number; y: number } => {
+    const position = progress * (course.length - 1);
+    const segment = Math.min(course.length - 2, Math.floor(position));
+    const local = position - segment;
+    const start = course[segment]!;
+    const end = course[segment + 1]!;
+    return {
+      x: start.x + (end.x - start.x) * local,
+      y: start.y + (end.y - start.y) * local
+    };
+  };
+
+  for (let i = 0; i < 145; i += 1) {
+    const center = pointAt(i / 144);
+    const spread = (rand() - 0.5) * 78;
+    const x = center.x + spread;
+    const y = center.y + (rand() - 0.5) * 34;
+    if (!insideWorldDiamond(x, y)) continue;
     addGlyph(parent, {
       char: ["≈", "∿", "﹏", "~", "〜"][Math.floor(rand() * 5)] ?? "≈",
-      x: x + spread,
-      y: y + (rand() - 0.5) * 30,
+      x,
+      y,
       size: 16 + rand() * 16,
       color: rand() > 0.55 ? "#197eb5" : "#38a8dd",
       alpha: 0.42 + rand() * 0.2,
       rotation: -0.22
     });
   }
-  for (let i = 0; i < 42; i += 1) {
-    const t = i / 42;
+  for (let i = 0; i < 58; i += 1) {
+    const center = pointAt(i / 57);
+    const x = center.x + (rand() - 0.5) * 78;
+    const y = center.y + (rand() - 0.5) * 85;
+    if (!insideWorldDiamond(x, y)) continue;
     addGlyph(parent, {
       char: "·",
-      x: 1712 + t * 620 + Math.sin(t * 8) * 68 + (rand() - 0.5) * 40,
-      y: 120 + t * 540 + Math.sin(t * 5.5) * 44 + (rand() - 0.5) * 130,
+      x,
+      y,
       size: 7 + rand() * 9,
       color: "#6bd4e4",
       alpha: 0.55
@@ -169,17 +208,22 @@ function addRiver(parent: Container): void {
 function addTerrain(layers: WorldLayers): void {
   const rand = random(1204);
   const grass = ["·", "˙", "‚", "⁙", "⸱", "∙", "'", "٫"];
-  const greens = ["#1b7c3d", "#278b47", "#45a859", "#286a36", "#76c56e", "#3d934e"];
-  for (let i = 0; i < 680; i += 1) {
+  const sands = ["#a98a61", "#b99a70", "#c5a77c", "#8f754f", "#d0b386"];
+  let placed = 0;
+  let attempts = 0;
+  while (placed < 680 && attempts < 5000) {
+    attempts += 1;
     const x = rand() * WORLD_WIDTH;
     const y = rand() * WORLD_HEIGHT;
+    if (!insideWorldDiamond(x, y)) continue;
+    placed += 1;
     const size = 7 + rand() * 11;
     addGlyph(layers.terrain, {
       char: grass[Math.floor(rand() * grass.length)] ?? "·",
       x,
       y,
       size,
-      color: greens[Math.floor(rand() * greens.length)] ?? "#607b55",
+      color: sands[Math.floor(rand() * sands.length)] ?? "#b99a70",
       alpha: 0.25 + rand() * 0.43,
       rotation: (rand() - 0.5) * 1.2
     });
@@ -190,14 +234,15 @@ function addTerrain(layers: WorldLayers): void {
   addQuadraticPath(layers.details, { x: 1190, y: 930 }, { x: 1370, y: 1190 }, { x: 1510, y: 1660 }, 83, 92);
   addQuadraticPath(layers.details, { x: 1190, y: 930 }, { x: 1280, y: 630 }, { x: 1610, y: 480 }, 67, 93);
 
-  addForest(layers.details, 390, 390, 245, 180, 33);
-  addForest(layers.details, 2060, 1305, 245, 200, 39);
-  addForest(layers.details, 2200, 550, 170, 140, 45);
-  addForest(layers.details, 580, 1510, 185, 140, 51);
+  addForest(layers.details, 900, 500, 140, 105, 33);
+  addForest(layers.details, 1900, 930, 155, 110, 39);
+  addForest(layers.details, 1180, 1160, 125, 95, 45);
+  addForest(layers.details, 1700, 1410, 145, 115, 51);
 
   for (let i = 0; i < 74; i += 1) {
-    const x = 1550 + rand() * 360;
-    const y = 1260 + rand() * 360;
+    const x = 1320 + rand() * 300;
+    const y = 1250 + rand() * 250;
+    if (!insideWorldDiamond(x, y)) continue;
     addGlyph(layers.details, {
       char: ["▲", "△", "▴", "◆", "◈"][Math.floor(rand() * 5)] ?? "▲",
       x,
@@ -212,8 +257,9 @@ function addTerrain(layers: WorldLayers): void {
   // Irregular field furrows: the lines intentionally drift rather than snapping to a tile grid.
   for (let row = 0; row < 7; row += 1) {
     for (let col = 0; col < 13; col += 1) {
-      const x = 360 + col * 25 + (rand() - 0.5) * 12 + row * 3;
-      const y = 1190 + row * 22 + Math.sin(col * 0.55) * 8 + (rand() - 0.5) * 8;
+      const x = 480 + col * 18 + (rand() - 0.5) * 10 + row * 2;
+      const y = 1130 + row * 13 + Math.sin(col * 0.55) * 6 + (rand() - 0.5) * 6;
+      if (!insideWorldDiamond(x, y)) continue;
       addGlyph(layers.details, {
         char: rand() > 0.5 ? "╱" : "╲",
         x,
@@ -241,6 +287,7 @@ function addGridTerrain(layers: WorldLayers, grid: WorldGrid): void {
   };
 
   for (const tile of grid.tiles) {
+    if (tile.terrain === "sand" && (tile.col + tile.row * 3) % 5 !== 0) continue;
     const point = worldPositionForCell(grid, tile.col, tile.row);
     if (!point || point.x < 0 || point.x > WORLD_WIDTH || point.y < 0 || point.y > WORLD_HEIGHT) continue;
     const mark = symbols[tile.terrain] ?? symbols.sand!;
@@ -424,8 +471,8 @@ export function createWorld(root: Container): WorldState {
   const riders = makeUnit(layers.actors, 775, 1300, 2);
   entities.push(entity(riders, "riders", "Zwiadowcy", "unit", "Ruchliwy oddział patrolowy. Może szybko dotrzeć do odległych części posiadłości.", "ZWIADOWCY · KONNI", 775, 1300, 100, 5, "player", "cavalry"));
 
-  const raiders = makeUnit(layers.actors, 1890, 945, 3);
-  entities.push(entity(raiders, "raiders", "Banda rozbójników", "unit", "Wrogi oddział grasujący przy trakcie. Czerwone sztandary oznaczają nieprzyjaciela.", "ROZBÓJNICY · WROGI ODDZIAŁ", 1890, 945, 100, 9, "enemy", "raiders"));
+  const raiders = makeUnit(layers.actors, 2150, 1050, 3);
+  entities.push(entity(raiders, "raiders", "Banda rozbójników", "unit", "Wrogi oddział grasujący przy trakcie. Czerwone sztandary oznaczają nieprzyjaciela.", "ROZBÓJNICY · WROGI ODDZIAŁ", 2150, 1050, 100, 9, "enemy", "raiders"));
 
   return { entities, layers, grid };
 }

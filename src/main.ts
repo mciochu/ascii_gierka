@@ -134,6 +134,7 @@ const cameraBookmarks = new Map<number, CameraState>();
 const placedStructures = new Map<string, { wood: number; stone: number }>();
 const undoStack: string[] = [];
 let minimapRefresh = 0;
+let lastViewportCenter = { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 };
 
 function setStatus(message: string): void {
   statusMessage.textContent = message;
@@ -172,14 +173,15 @@ function renderBuildCategory(): void {
   const category = findBuildCategory(activeCategoryId) ?? BUILD_CATEGORIES[0]!;
   contextTitle.textContent = category.name.toLocaleUpperCase("pl-PL");
   contextSubtitle.textContent = category.items.length + " POZYCJI · " + category.description.toLocaleUpperCase("pl-PL");
-  const itemsMarkup = category.items.map((item) =>
-    '<button type="button" class="build-item' + (item.implemented ? "" : " unavailable") +
+  const itemsMarkup = category.items.map((item) => {
+    const tooltip = item.name + (item.cost ? " — koszt: " + item.cost : item.note ? " — " + item.note : " — dostępne w kolejnym etapie");
+    return '<button type="button" class="build-item' + (item.implemented ? "" : " unavailable") +
     (selectedBuildItemId === item.id ? " selected" : "") + '" data-build-id="' + item.id +
-    '" title="' + (item.note ?? item.name) + '"><span class="build-glyph">' + item.glyph +
+    '" title="' + tooltip + '"><span class="build-glyph">' + item.glyph +
     '</span><span><b>' + item.name + '</b><small>' +
     (item.cost ?? (item.implemented ? "DOSTĘPNE" : "KOLEJNY ETAP")) +
-    '</small></span></button>'
-  ).join("");
+    '</small></span></button>';
+  }).join("");
   contextContent.innerHTML = '<div class="build-list">' + itemsMarkup + '</div>';
   contextContent.querySelectorAll<HTMLButtonElement>("[data-build-id]").forEach((button) => {
     button.addEventListener("click", () => selectBuildItem(button.dataset.buildId ?? ""));
@@ -189,6 +191,10 @@ function renderBuildCategory(): void {
 function selectBuildItem(itemId: string): void {
   const item = findBuildItem(itemId);
   if (!item) return;
+  if (item.implemented && paused) {
+    setStatus("Gra jest wstrzymana — wznów symulację, aby rozpocząć budowanie.");
+    return;
+  }
   selectedBuildItemId = itemId;
   renderBuildCategory();
   if (!item.implemented) {
@@ -271,7 +277,8 @@ function renderSelectionPanel(): void {
     const health = Math.round(selection.reduce((sum, entity) => sum + entity.health, 0) / selection.length);
     const typeButtons = types.map((type) =>
       '<button type="button" class="unit-filter" data-unit-type="' + type + '"><span class="unit-portrait">♟</span><b>' + type +
-      '</b><small>×' + units.filter((unit) => (unit.unitClass ?? unit.role) === type).length + '</small></button>'
+      '</b><small>×' + units.filter((unit) => (unit.unitClass ?? unit.role) === type)
+        .reduce((sum, unit) => sum + (unit.count ?? 1), 0) + '</small></button>'
     ).join("");
     const stanceButtons = units.length
       ? '<div class="stance-controls"><small>POSTAWY BOJOWE</small><div>' +
@@ -882,9 +889,37 @@ function finishPointer(event: PointerEvent): void {
     handleLeftClick(event.clientX, event.clientY, session.additive, session.toggle);
   }
 }
+function cancelPointer(event: PointerEvent): void {
+  if (!pointerSession || pointerSession.pointerId !== event.pointerId) return;
+  const session = pointerSession;
+  pointerSession = null;
+  hideSelectionRectangle();
+  gestureMenu.hidden = true;
+  if (session.kind === "pan") {
+    canvas.style.cursor = mode === "select" ? "default" : mode === "attack-move" ? "crosshair" : mode === "build" ? "copy" : "not-allowed";
+  }
+}
 canvas.addEventListener("pointerup", finishPointer);
-canvas.addEventListener("pointercancel", finishPointer);
+canvas.addEventListener("pointercancel", cancelPointer);
+canvas.addEventListener("lostpointercapture", cancelPointer);
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+
+function preserveCameraCenter(nextCenter: { x: number; y: number }): void {
+  const worldAtCenter = viewportToWorld(lastViewportCenter, {
+    position: { x: worldRoot.position.x, y: worldRoot.position.y },
+    pivot: MAP_PIVOT,
+    zoom,
+    quarterTurns: mapRotation
+  });
+  const offset = worldToViewport(worldAtCenter, {
+    position: { x: 0, y: 0 },
+    pivot: MAP_PIVOT,
+    zoom,
+    quarterTurns: mapRotation
+  });
+  worldRoot.position.set(nextCenter.x - offset.x, nextCenter.y - offset.y);
+  lastViewportCenter = nextCenter;
+}
 
 function zoomAt(nextZoom: number, clientX?: number, clientY?: number): void {
   const clamped = Math.max(0.28, Math.min(1.7, nextZoom));
@@ -913,7 +948,8 @@ function centerCamera(): void {
   worldRoot.pivot.set(MAP_PIVOT.x, MAP_PIVOT.y);
   worldRoot.rotation = mapRotation * Math.PI / 2;
   worldRoot.scale.set(zoom);
-  worldRoot.position.set(viewport.clientWidth / 2, viewport.clientHeight / 2);
+  lastViewportCenter = { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 };
+  worldRoot.position.set(lastViewportCenter.x, lastViewportCenter.y);
   zoomLabel.textContent = String(Math.round(zoom * 100)) + "%";
 }
 
@@ -940,7 +976,8 @@ function toggleHud(): void {
   hudVisible = !hudVisible;
   hud.hidden = !hudVisible;
   hudReveal.hidden = hudVisible;
-  if (hudVisible) centerCamera();
+  preserveCameraCenter({ x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 });
+  renderMinimap();
   setStatus(hudVisible ? "HUD został pokazany." : "HUD został ukryty. Użyj przycisku na dole ekranu lub klawisza Tab, aby go przywrócić.");
 }
 
@@ -1562,9 +1599,15 @@ function jumpToBuilding(key: string): void {
 }
 
 window.addEventListener("keydown", (event) => {
+  const key = event.key.toLowerCase();
+  if (key === "escape" && !dialogOverlay.hidden) {
+    event.preventDefault();
+    closeDialog();
+    return;
+  }
+  if (!dialogOverlay.hidden) return;
   const target = event.target;
   if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
-  const key = event.key.toLowerCase();
   const numberKey = /^[0-9]$/.test(event.key);
 
   if (event.ctrlKey && event.altKey && numberKey) {
@@ -1840,6 +1883,6 @@ renderBuildCategory();
 renderMinimap();
 updateScribe();
 window.addEventListener("resize", () => {
-  centerCamera();
+  preserveCameraCenter({ x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 });
   renderMinimap();
 });

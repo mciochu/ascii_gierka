@@ -53,3 +53,29 @@ test("skróty klasycznego sterowania i kamery są podłączone do zdarzeń", () 
     assert.match(main, expression);
   }
 });
+
+
+test("anulowanie Pointer nie może wykonywać kliknięcia ani rozkazu", () => {
+  assert.match(main, /function cancelPointer\(event: PointerEvent\): void[\s\S]*?hideSelectionRectangle\(\);[\s\S]*?gestureMenu\.hidden = true;/);
+  assert.match(main, /canvas\.addEventListener\("pointercancel", cancelPointer\)/);
+  assert.doesNotMatch(main, /canvas\.addEventListener\("pointercancel", finishPointer\)/);
+});
+
+test("otwarty dialog odcina skróty mapy, ale Escape zamyka okno", () => {
+  assert.match(main, /if \(key === "escape" && !dialogOverlay\.hidden\)[\s\S]*?closeDialog\(\);[\s\S]*?return;[\s\S]*?if \(!dialogOverlay\.hidden\) return;/);
+});
+
+test("HUD i zmiana rozmiaru zachowują punkt obserwacji kamery", () => {
+  assert.match(main, /function preserveCameraCenter\(/);
+  assert.match(main, /function toggleHud\(\): void \{[\s\S]*?preserveCameraCenter\(/);
+  assert.match(main, /window\.addEventListener\("resize", \(\) => \{[\s\S]*?preserveCameraCenter\(/);
+  assert.doesNotMatch(main, /if \(hudVisible\) centerCamera\(\)/);
+});
+
+test("liczebność portretu typu uwzględnia licznik żołnierzy w grupie", () => {
+  assert.match(main, /units\.filter\(\(unit\) => \(unit\.unitClass \?\? unit\.role\) === type\)[\s\S]*?reduce\(\(sum, unit\) => sum \+ \(unit\.count \?\? 1\), 0\)/);
+});
+
+test("wybór aktywnej budowli w pauzie nie sugeruje wejścia w tryb budowania", () => {
+  assert.match(main, /if \(item\.implemented && paused\)[\s\S]*?rozpocząć budowanie/);
+});

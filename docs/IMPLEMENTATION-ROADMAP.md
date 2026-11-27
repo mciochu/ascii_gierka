@@ -140,8 +140,9 @@ Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
 - Ctrl+Alt+0–9 zapisuje zakładkę kamery, Alt+0–9 ją przywraca; Ctrl+0–9 przypisuje grupę wojska, sam klawisz wybiera grupę. H/G/M/B/N/I/S skaczą do istniejących lub przewidzianych punktów kluczowych, a Shift+klawisz wraca do poprzedniego widoku.
 - Trzy postawy mają działające zachowanie prototypowe: „Utrzymać pozycję” atakuje wyłącznie cel w zasięgu i nie podchodzi; „Obronna” ściga pobliskie zagrożenie i wraca do punktu startu; „Agresywna” ściga wykrytego przeciwnika niezależnie od dystansu. Wszystkie ścieżki ruchu korzystają z nawigacji siatkowej z etapu 1.
 
-**Wynik testów**
-- 28/28 testów automatycznych PASS (w tym 4 testy katalogu i 3 testy powłoki HUD/sterowania).
+**Wynik audytu i testów**
+- Poprawiono anulowanie `pointercancel` (nie może kończyć się kliknięciem/rozkazem), blokadę skrótów mapy podczas otwartego dialogu, zachowanie punktu widoku podczas ukrywania/pokazywania HUD-u i zmiany rozmiaru, liczebność portretów typów oraz komunikat budowania w pauzie.
+- 35/35 testów automatycznych PASS (w tym testy katalogu, siatki, ekonomii oraz regresje interfejsu i sterowania).
 - TypeScript PASS.
 - Vite production build PASS.
 - git diff --check PASS przed zatwierdzeniem.

@@ -2,6 +2,7 @@ import { Application, Container, Text } from "pixi.js";
 import "./style.css";
 import { addGlyph } from "./engine/glyph";
 import { createWatchtower, createWorld, WORLD_SIZE, type GameEntity } from "./engine/world";
+import { advanceSimulation, createSimulation, setGameSpeed } from "./engine/simulation";
 
 type ToolMode = "select" | "attack-move" | "build";
 type PointerSession = {
@@ -64,10 +65,11 @@ const entities = world.entities;
 let zoom = 0.62;
 let mode: ToolMode = "select";
 let paused = false;
-let gold = 1240;
-let food = 860;
-let wood = 340;
-let stone = 210;
+const simulation = createSimulation();
+let gold = simulation.gold;
+let food = simulation.food;
+let wood = simulation.wood;
+let stone = simulation.stone;
 let towerCounter = 0;
 let pointerSession: PointerSession | null = null;
 let lastClick: { id: string; at: number } | null = null;
@@ -110,6 +112,7 @@ function setMode(next: ToolMode): void {
 }
 
 function setResources(): void {
+  gold = simulation.gold; food = simulation.food; wood = simulation.wood; stone = simulation.stone;
   if (goldValue) goldValue.textContent = gold.toLocaleString("pl-PL");
   if (foodValue) foodValue.textContent = food.toLocaleString("pl-PL");
   if (woodValue) woodValue.textContent = wood.toLocaleString("pl-PL");
@@ -331,6 +334,7 @@ function setMoveOrder(unit: GameEntity, x: number, y: number, queued: boolean): 
 }
 
 function issueFormationOrder(x: number, y: number, queued: boolean): void {
+  if (paused) { setStatus("Gra jest wstrzymana — wznów symulację, aby wydawać rozkazy."); return; }
   const units = selectedUnits();
   if (units.length === 0) {
     setStatus("Najpierw zaznacz własne oddziały.");
@@ -353,6 +357,7 @@ function issueFormationOrder(x: number, y: number, queued: boolean): void {
 }
 
 function issueAttackOrder(target: GameEntity): void {
+  if (paused) { setStatus("Gra jest wstrzymana — wznów symulację, aby wydawać rozkazy."); return; }
   const units = selectedUnits();
   if (units.length === 0) {
     setStatus("Zaznacz własne oddziały, aby wydać rozkaz ataku.");
@@ -369,6 +374,7 @@ function issueAttackOrder(target: GameEntity): void {
 }
 
 function issueAttackMove(x: number, y: number): void {
+  if (paused) { setStatus("Gra jest wstrzymana — wznów symulację, aby wydawać rozkazy."); setMode("select"); return; }
   const units = selectedUnits();
   if (units.length === 0) {
     setStatus("Najpierw zaznacz własne oddziały.");
@@ -391,6 +397,7 @@ function issueAttackMove(x: number, y: number): void {
 }
 
 function stopUnits(): void {
+  if (paused) { setStatus("Gra jest wstrzymana — rozkazy są niedostępne."); return; }
   for (const unit of selectedUnits()) {
     unit.moveTarget = undefined;
     unit.attackMoveTarget = undefined;
@@ -402,6 +409,7 @@ function stopUnits(): void {
 }
 
 function holdUnits(): void {
+  if (paused) { setStatus("Gra jest wstrzymana — rozkazy są niedostępne."); return; }
   for (const unit of selectedUnits()) {
     unit.moveTarget = undefined;
     unit.attackMoveTarget = undefined;
@@ -429,6 +437,7 @@ function handleContextCommand(clientX: number, clientY: number, queued: boolean)
 }
 
 function placeWatchtower(x: number, y: number): void {
+  if (paused) { setStatus("Gra jest wstrzymana — budowanie jest niedostępne."); return; }
   if (wood < 70 || stone < 30) {
     setStatus("Brakuje surowców: wieża wymaga 70 drewna i 30 kamienia.");
     return;
@@ -442,8 +451,8 @@ function placeWatchtower(x: number, y: number): void {
     return;
   }
 
-  wood -= 70;
-  stone -= 30;
+  simulation.wood -= 70;
+  simulation.stone -= 30;
   towerCounter += 1;
   const tower = createWatchtower(world.layers.structures, x, y, towerCounter);
   entities.push(tower);
@@ -454,6 +463,7 @@ function placeWatchtower(x: number, y: number): void {
 }
 
 function handleLeftClick(clientX: number, clientY: number, additive: boolean, toggle: boolean): void {
+  if (paused && mode !== "select") { setStatus("Gra jest wstrzymana — wznowienie odblokuje budowanie i rozkazy."); return; }
   const point = screenToWorld(clientX, clientY);
   if (mode === "build") {
     placeWatchtower(point.x, point.y);
@@ -625,6 +635,19 @@ document.querySelector<HTMLButtonElement>("#pause-button")?.addEventListener("cl
   }
   setStatus(paused ? "Symulacja zatrzymana." : "Symulacja wznowiona.");
 });
+function updateSpeedLabel(): void {
+  const label = document.querySelector<HTMLElement>("#speed-value");
+  if (label) label.textContent = String(simulation.speed);
+}
+document.querySelector<HTMLButtonElement>("#speed-down")?.addEventListener("click", () => {
+  setGameSpeed(simulation, simulation.speed - 5); updateSpeedLabel();
+  setStatus(`Prędkość symulacji: ${simulation.speed}.`);
+});
+document.querySelector<HTMLButtonElement>("#speed-up")?.addEventListener("click", () => {
+  setGameSpeed(simulation, simulation.speed + 5); updateSpeedLabel();
+  setStatus(`Prędkość symulacji: ${simulation.speed}.`);
+});
+
 document.querySelector<HTMLButtonElement>("#help-button")?.addEventListener("click", () => {
   setStatus("LPM: zaznacz / przeciągnij prostokąt. Shift: dodaj, Ctrl: przełącz. PPM: ruch lub atak. Środkowy przycisk: przesuwanie mapy. A: atak w ruchu, S: stop, H: obrona, Ctrl+1–9: grupy.");
 });
@@ -655,7 +678,9 @@ window.addEventListener("keydown", (event) => {
   if (key === "a") setMode("attack-move");
   if (key === "s") stopUnits();
   if (key === "h") holdUnits();
-  if (key === "b") setMode("build");
+  if (key === "b" && !paused) setMode("build");
+  if (key === "+" || key === "=") { setGameSpeed(simulation, simulation.speed + 5); updateSpeedLabel(); }
+  if (key === "-") { setGameSpeed(simulation, simulation.speed - 5); updateSpeedLabel(); }
   if (key === "escape") setMode("select");
   if (key === " " && target === document.body) {
     paused = !paused;
@@ -720,9 +745,6 @@ function updateCombat(deltaSeconds: number): void {
     const target = findTarget(unit.attackTargetId);
     if (!target) {
       unit.attackTargetId = undefined;
-      if (unit.attackMoveTarget && !unit.moveTarget) {
-        unit.moveTarget = { ...unit.attackMoveTarget };
-      }
       continue;
     }
 
@@ -768,6 +790,18 @@ app.ticker.add((ticker) => {
   if (paused) return;
   const deltaSeconds = Math.min(ticker.deltaMS / 1000, 0.05);
   panCamera(deltaSeconds);
+  const reports = advanceSimulation(simulation, deltaSeconds);
+  if (reports.length) {
+    const latest = reports[reports.length - 1]!;
+    setResources();
+    const monthLabel = document.querySelector<HTMLElement>("#month-value");
+    const populationLabel = document.querySelector<HTMLElement>("#population-value");
+    const popularityLabel = document.querySelector<HTMLElement>("#popularity-value");
+    if (monthLabel) monthLabel.textContent = `M${simulation.month}`;
+    if (populationLabel) populationLabel.textContent = `${simulation.population}/${simulation.housing}`;
+    if (popularityLabel) { popularityLabel.textContent = String(simulation.popularity); popularityLabel.style.color = simulation.popularity >= 50 ? "#64c982" : "#f06c65"; }
+    setStatus(`Rozliczenie miesiąca ${latest.month - 1}: żywność −${latest.foodConsumed.toFixed(1)}, złoto ${latest.taxes >= 0 ? "+" : ""}${latest.taxes.toFixed(1)}, popularność ${latest.popularityChange >= 0 ? "+" : ""}${latest.popularityChange}.`);
+  }
   updateCombat(deltaSeconds);
   for (const entity of entities) {
     if (entity.kind === "unit") moveUnit(entity, deltaSeconds);
@@ -776,6 +810,13 @@ app.ticker.add((ticker) => {
 
 setMode("select");
 setResources();
+updateSpeedLabel();
 centerCamera();
 updateSelection();
+const initialMonth = document.querySelector<HTMLElement>("#month-value");
+const initialPopulation = document.querySelector<HTMLElement>("#population-value");
+const initialPopularity = document.querySelector<HTMLElement>("#popularity-value");
+if (initialMonth) initialMonth.textContent = `M${simulation.month}`;
+if (initialPopulation) initialPopulation.textContent = `${simulation.population}/${simulation.housing}`;
+if (initialPopularity) initialPopularity.textContent = String(simulation.popularity);
 window.addEventListener("resize", centerCamera);

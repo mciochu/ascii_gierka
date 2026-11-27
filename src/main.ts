@@ -91,6 +91,7 @@ function selectedUnits(): GameEntity[] {
 }
 
 function setMode(next: ToolMode): void {
+  if (paused && next !== "select") { setStatus("Gra jest wstrzymana — nie można rozpoczynać budowania ani wydawać rozkazów."); next = "select"; }
   mode = next;
   document.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((button) => {
     button.classList.toggle("active", button.dataset.mode === mode);
@@ -626,15 +627,17 @@ document.querySelector<HTMLButtonElement>("#build-tower")?.addEventListener("cli
 document.querySelector<HTMLButtonElement>("#zoom-in")?.addEventListener("click", () => zoomAt(zoom * 1.18));
 document.querySelector<HTMLButtonElement>("#zoom-out")?.addEventListener("click", () => zoomAt(zoom / 1.18));
 document.querySelector<HTMLButtonElement>("#reset-camera")?.addEventListener("click", centerCamera);
-document.querySelector<HTMLButtonElement>("#pause-button")?.addEventListener("click", () => {
+function togglePause(): void {
   paused = !paused;
   const button = document.querySelector<HTMLButtonElement>("#pause-button");
   if (button) {
     button.innerHTML = paused ? "<span>▶</span><small>WZNÓW</small>" : "<span>Ⅱ</span><small>PAUZA</small>";
     button.classList.toggle("paused", paused);
   }
+  if (paused) setMode("select");
   setStatus(paused ? "Symulacja zatrzymana." : "Symulacja wznowiona.");
-});
+}
+document.querySelector<HTMLButtonElement>("#pause-button")?.addEventListener("click", togglePause);
 document.querySelector<HTMLSelectElement>("#ration-select")?.addEventListener("change", (event) => {
   const value = Number((event.currentTarget as HTMLSelectElement).value);
   if ([0, 0.5, 1, 1.5, 2].includes(value)) {
@@ -691,14 +694,11 @@ window.addEventListener("keydown", (event) => {
   if (key === "s") stopUnits();
   if (key === "h") holdUnits();
   if (key === "b" && !paused) setMode("build");
+  if (key === "p") togglePause();
   if (key === "+" || key === "=") { setGameSpeed(simulation, simulation.speed + 5); updateSpeedLabel(); }
   if (key === "-") { setGameSpeed(simulation, simulation.speed - 5); updateSpeedLabel(); }
   if (key === "escape") setMode("select");
-  if (key === " " && target === document.body) {
-    paused = !paused;
-    const pauseButton = document.querySelector<HTMLButtonElement>("#pause-button");
-    if (pauseButton) pauseButton.innerHTML = paused ? "<span>▶</span><small>WZNÓW</small>" : "<span>Ⅱ</span><small>PAUZA</small>";
-  }
+
   if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) event.preventDefault();
 });
 window.addEventListener("keyup", (event) => keysDown.delete(event.key.toLowerCase()));
@@ -812,7 +812,7 @@ app.ticker.add((ticker) => {
     if (monthLabel) monthLabel.textContent = `M${simulation.month}`;
     if (populationLabel) populationLabel.textContent = `${simulation.population}/${simulation.housing}`;
     if (popularityLabel) { popularityLabel.textContent = String(simulation.popularity); popularityLabel.style.color = simulation.popularity >= 50 ? "#64c982" : "#f06c65"; }
-    setStatus(`Rozliczenie miesiąca ${latest.month - 1}: żywność −${latest.foodConsumed.toFixed(1)}, złoto ${latest.taxes >= 0 ? "+" : ""}${latest.taxes.toFixed(1)}, popularność ${latest.popularityChange >= 0 ? "+" : ""}${latest.popularityChange}.`);
+    setStatus(`Rozliczenie miesiąca ${latest.month - 1}: żywność −${latest.foodConsumed.toFixed(2)}, złoto ${latest.taxes >= 0 ? "+" : ""}${latest.taxes.toFixed(1)}${latest.bribeCost ? `, łapówka −${latest.bribeCost.toFixed(1)}` : ""}, popularność ${latest.popularityChange >= 0 ? "+" : ""}${latest.popularityChange}.`);
   }
   updateCombat(deltaSeconds);
   for (const entity of entities) {

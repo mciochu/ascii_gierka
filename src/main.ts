@@ -16,15 +16,15 @@ type PointerSession = {
   toggle: boolean;
 };
 
-const viewport = document.querySelector<HTMLDivElement>("#map-viewport");
-const statusMessage = document.querySelector<HTMLElement>("#status-message");
-const zoomLabel = document.querySelector<HTMLElement>("#zoom-label");
-const modeLabel = document.querySelector<HTMLElement>("#mode-label");
-const mapHint = document.querySelector<HTMLElement>("#map-hint");
-const selectedCountLabel = document.querySelector<HTMLElement>("#selected-count");
-const selectionContent = document.querySelector<HTMLElement>("#selection-content");
-const selectionRect = document.querySelector<HTMLDivElement>("#selection-rect");
-const inspector = document.querySelector<HTMLElement>(".inspector");
+const viewport = document.querySelector<HTMLDivElement>("#map-viewport")!;
+const statusMessage = document.querySelector<HTMLElement>("#status-message")!;
+const zoomLabel = document.querySelector<HTMLElement>("#zoom-label")!;
+const modeLabel = document.querySelector<HTMLElement>("#mode-label")!;
+const mapHint = document.querySelector<HTMLElement>("#map-hint")!;
+const selectedCountLabel = document.querySelector<HTMLElement>("#selected-count")!;
+const selectionContent = document.querySelector<HTMLElement>("#selection-content")!;
+const selectionRect = document.querySelector<HTMLDivElement>("#selection-rect")!;
+const inspector = document.querySelector<HTMLElement>(".inspector")!;
 
 if (!viewport || !statusMessage || !zoomLabel || !modeLabel || !mapHint ||
     !selectedCountLabel || !selectionContent || !selectionRect || !inspector) {
@@ -627,6 +627,15 @@ document.querySelector<HTMLButtonElement>("#pause-button")?.addEventListener("cl
 });
 document.querySelector<HTMLButtonElement>("#help-button")?.addEventListener("click", () => {
   setStatus("LPM: zaznacz / przeciągnij prostokąt. Shift: dodaj, Ctrl: przełącz. PPM: ruch lub atak. Środkowy przycisk: przesuwanie mapy. A: atak w ruchu, S: stop, H: obrona, Ctrl+1–9: grupy.");
+});
+
+document.querySelectorAll<HTMLButtonElement>("[data-command-global]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const command = button.dataset.commandGlobal ?? "";
+    if (command === "stop") stopUnits();
+    else if (command === "hold") holdUnits();
+    else if (command === "attack-move") setMode("attack-move");
+  });
 });
 
 window.addEventListener("keydown", (event) => {

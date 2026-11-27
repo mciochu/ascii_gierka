@@ -82,6 +82,33 @@
               <button type="button" data-command-global="attack-move"><span>⚔</span><b>ATAK W RUCHU</b><small>A</small></button>
             </div>
           </section>
+          <section class="economy-section">
+            <div class="section-kicker">GOSPODARKA · USTAWIENIA MIESIĘCZNE</div>
+            <label class="economy-control">Racje żywnościowe
+              <select id="ration-select">
+                <option value="0">Brak racji · −8</option>
+                <option value="0.5">Połowa · −4</option>
+                <option value="1" selected>Normalne · 0</option>
+                <option value="1.5">Dodatkowe · +4</option>
+                <option value="2">Podwójne · +8</option>
+              </select>
+            </label>
+            <label class="economy-control">Podatki i łapówki
+              <select id="tax-select">
+                <option value="bribe-generous">Hojna łapówka · +7</option>
+                <option value="bribe-large">Duża łapówka · +5</option>
+                <option value="bribe-small">Mała łapówka · +3</option>
+                <option value="none" selected>Brak podatków · +1</option>
+                <option value="low">Niskie podatki · −2</option>
+                <option value="medium">Średnie podatki · −4</option>
+                <option value="high">Wysokie podatki · −6</option>
+                <option value="heavy">Uciążliwe podatki · −8</option>
+                <option value="extortionate">Złodziejskie podatki · −12</option>
+                <option value="cruel">Okrutne podatki · −16</option>
+              </select>
+            </label>
+            <p class="build-note">Zmiany zostaną rozliczone na początku kolejnego miesiąca. Koszty łapówek są wyłączone do czasu ustalenia ich wartości.</p>
+          </section>
           <section class="build-section">
             <div class="section-kicker">ROZBUDOWA TWIERDZY</div>
             <button class="build-option" id="build-tower" type="button"><span class="build-symbol">▥</span><span><b>Wieża strażnicza</b><small>70 drewna · 30 kamienia</small></span><span class="build-arrow">＋</span></button>

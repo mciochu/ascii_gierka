@@ -3,6 +3,7 @@ import "./style.css";
 import { addGlyph } from "./engine/glyph";
 import { createWatchtower, createWorld, WORLD_SIZE, type GameEntity } from "./engine/world";
 import { advanceSimulation, createSimulation, setGameSpeed } from "./engine/simulation";
+import { findGridPath, isBuildableAtWorld, rotateOffset, worldPositionForCell, worldToCell } from "./engine/grid";
 
 type ToolMode = "select" | "attack-move" | "build";
 type PointerSession = {
@@ -63,6 +64,7 @@ const world = createWorld(worldRoot);
 const entities = world.entities;
 
 let zoom = 0.62;
+let mapRotation = 0;
 let mode: ToolMode = "select";
 let paused = false;
 const simulation = createSimulation();
@@ -225,10 +227,11 @@ function toggleSelection(entity: GameEntity): void {
 
 function screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
   const rect = canvas.getBoundingClientRect();
-  return {
+  const offset = rotateOffset({
     x: (screenX - rect.left - worldRoot.position.x) / zoom,
     y: (screenY - rect.top - worldRoot.position.y) / zoom
-  };
+  }, -mapRotation);
+  return { x: 1190 + offset.x, y: 915 + offset.y };
 }
 
 function findEntityAt(x: number, y: number): GameEntity | null {
@@ -247,13 +250,18 @@ function findEntityAt(x: number, y: number): GameEntity | null {
 }
 
 function visibleWorldBounds(): { left: number; top: number; right: number; bottom: number } {
-  const topLeft = screenToWorld(viewport.getBoundingClientRect().left, viewport.getBoundingClientRect().top);
-  const bottomRight = screenToWorld(viewport.getBoundingClientRect().right, viewport.getBoundingClientRect().bottom);
+  const rect = viewport.getBoundingClientRect();
+  const corners = [
+    screenToWorld(rect.left, rect.top),
+    screenToWorld(rect.right, rect.top),
+    screenToWorld(rect.left, rect.bottom),
+    screenToWorld(rect.right, rect.bottom)
+  ];
   return {
-    left: Math.min(topLeft.x, bottomRight.x),
-    top: Math.min(topLeft.y, bottomRight.y),
-    right: Math.max(topLeft.x, bottomRight.x),
-    bottom: Math.max(topLeft.y, bottomRight.y)
+    left: Math.min(...corners.map((point) => point.x)),
+    top: Math.min(...corners.map((point) => point.y)),
+    right: Math.max(...corners.map((point) => point.x)),
+    bottom: Math.max(...corners.map((point) => point.y))
   };
 }
 
@@ -316,22 +324,34 @@ function selectClickedEntity(entity: GameEntity, additive: boolean, toggle: bool
   setStatus(`Wybrano: ${entity.name}.`);
 }
 
-function setMoveOrder(unit: GameEntity, x: number, y: number, queued: boolean): void {
+function setMoveOrder(unit: GameEntity, x: number, y: number, queued: boolean): boolean {
   unit.attackTargetId = undefined;
   unit.attackMoveTarget = undefined;
   unit.holdPosition = false;
-  const target = {
+  const destination = {
     x: Math.max(28, Math.min(WORLD_SIZE.width - 28, x)),
     y: Math.max(28, Math.min(WORLD_SIZE.height - 28, y))
   };
+  const lastQueuedPoint = unit.movementQueue?.[unit.movementQueue.length - 1];
+  const routeStart = queued ? lastQueuedPoint ?? unit.moveTarget ?? unit : unit;
+  const route = findGridPath(world.grid, routeStart, destination);
+  if (!route) {
+    if (!queued) {
+      unit.moveTarget = undefined;
+      unit.movementQueue = [];
+    }
+    return false;
+  }
+  if (route.length === 0) route.push(destination);
   if (queued) {
     unit.movementQueue ??= [];
-    unit.movementQueue.push(target);
+    unit.movementQueue.push(...route);
     if (!unit.moveTarget) unit.moveTarget = unit.movementQueue.shift();
   } else {
-    unit.movementQueue = [];
-    unit.moveTarget = target;
+    unit.movementQueue = route.slice(1);
+    unit.moveTarget = route[0];
   }
+  return true;
 }
 
 function issueFormationOrder(x: number, y: number, queued: boolean): void {
@@ -345,16 +365,19 @@ function issueFormationOrder(x: number, y: number, queued: boolean): void {
   const columns = Math.ceil(Math.sqrt(units.length));
   const rows = Math.ceil(units.length / columns);
   const spacing = units.length > 12 ? 66 : 54;
+  let routed = 0;
   units.forEach((unit, index) => {
     const column = index % columns;
     const row = Math.floor(index / columns);
     const offsetX = (column - (columns - 1) / 2) * spacing;
     const offsetY = (row - (rows - 1) / 2) * spacing;
-    setMoveOrder(unit, x + offsetX, y + offsetY, queued);
+    if (setMoveOrder(unit, x + offsetX, y + offsetY, queued)) routed += 1;
   });
-  setStatus(queued
-    ? `Dodano rozkaz do kolejki dla ${units.length} oddziałów.`
-    : `Rozkaz marszu: ${units.length} oddziałów rusza w szyku.`);
+  setStatus(routed === units.length
+    ? queued
+      ? "Dodano trasę do kolejki dla " + routed + " oddziałów."
+      : "Rozkaz marszu: " + routed + " oddziałów rusza wyznaczoną trasą."
+    : "Trasę wyznaczono dla " + routed + "/" + units.length + " oddziałów. Woda lub klify blokują przejście.");
 }
 
 function issueAttackOrder(target: GameEntity): void {
@@ -384,16 +407,22 @@ function issueAttackMove(x: number, y: number): void {
   }
   const columns = Math.ceil(Math.sqrt(units.length));
   const rows = Math.ceil(units.length / columns);
+  let routed = 0;
   units.forEach((unit, index) => {
     const offsetX = (index % columns - (columns - 1) / 2) * 54;
     const offsetY = (Math.floor(index / columns) - (rows - 1) / 2) * 54;
+    const destination = { x: x + offsetX, y: y + offsetY };
+    const route = findGridPath(world.grid, unit, destination);
     unit.attackTargetId = undefined;
     unit.holdPosition = false;
-    unit.movementQueue = [];
-    unit.attackMoveTarget = { x: x + offsetX, y: y + offsetY };
-    unit.moveTarget = { ...unit.attackMoveTarget };
+    unit.movementQueue = route ? route.slice(1) : [];
+    unit.attackMoveTarget = route ? destination : undefined;
+    unit.moveTarget = route ? route[0] ?? destination : undefined;
+    if (route) routed += 1;
   });
-  setStatus("Oddziały ruszają z rozkazem ataku w ruchu.");
+  setStatus(routed === units.length
+    ? "Oddziały ruszają wyznaczoną trasą z rozkazem ataku w ruchu."
+    : "Trasę ataku wyznaczono dla " + routed + "/" + units.length + " oddziałów.");
   setMode("select");
 }
 
@@ -447,7 +476,13 @@ function placeWatchtower(x: number, y: number): void {
     setStatus("Nie można budować poza granicami mapy.");
     return;
   }
-  if (entities.some((entity) => Math.hypot(entity.x - x, entity.y - y) < (entity.kind === "building" ? 112 : 48))) {
+  const buildTile = worldToCell(world.grid, { x, y });
+  const buildPoint = buildTile ? worldPositionForCell(world.grid, buildTile.col, buildTile.row) : null;
+  if (!buildPoint || !isBuildableAtWorld(world.grid, buildPoint)) {
+    setStatus("Teren jest niedostępny pod budowę. Woda, las, klify i złoża mają własne zasady zabudowy.");
+    return;
+  }
+  if (entities.some((entity) => Math.hypot(entity.x - buildPoint.x, entity.y - buildPoint.y) < (entity.kind === "building" ? 112 : 48))) {
     setStatus("To miejsce jest zajęte. Wybierz wolny teren.");
     return;
   }
@@ -455,7 +490,7 @@ function placeWatchtower(x: number, y: number): void {
   simulation.wood -= 70;
   simulation.stone -= 30;
   towerCounter += 1;
-  const tower = createWatchtower(world.layers.structures, x, y, towerCounter);
+  const tower = createWatchtower(world.layers.structures, buildPoint.x, buildPoint.y, towerCounter);
   entities.push(tower);
   setResources();
   replaceSelection([tower]);
@@ -578,22 +613,32 @@ function zoomAt(nextZoom: number, clientX?: number, clientY?: number): void {
   const rect = canvas.getBoundingClientRect();
   const px = clientX === undefined ? rect.width / 2 : clientX - rect.left;
   const py = clientY === undefined ? rect.height / 2 : clientY - rect.top;
-  const worldX = (px - worldRoot.position.x) / zoom;
-  const worldY = (py - worldRoot.position.y) / zoom;
+  const focus = screenToWorld(
+    clientX === undefined ? rect.left + px : clientX,
+    clientY === undefined ? rect.top + py : clientY
+  );
+  const offset = rotateOffset({ x: (focus.x - 1190) * clamped, y: (focus.y - 915) * clamped }, mapRotation);
   zoom = clamped;
   worldRoot.scale.set(zoom);
-  worldRoot.position.set(px - worldX * zoom, py - worldY * zoom);
-  zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+  worldRoot.position.set(px - offset.x, py - offset.y);
+  zoomLabel.textContent = String(Math.round(zoom * 100)) + "%";
 }
 
 function centerCamera(): void {
   zoom = 0.62;
+  worldRoot.pivot.set(1190, 915);
+  worldRoot.rotation = mapRotation * Math.PI / 2;
   worldRoot.scale.set(zoom);
-  worldRoot.position.set(
-    viewport.clientWidth / 2 - 1190 * zoom,
-    viewport.clientHeight / 2 - 915 * zoom
-  );
-  zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+  worldRoot.position.set(viewport.clientWidth / 2, viewport.clientHeight / 2);
+  zoomLabel.textContent = String(Math.round(zoom * 100)) + "%";
+}
+
+function rotateMap(direction: 1 | -1): void {
+  mapRotation = (mapRotation + direction + 4) % 4;
+  worldRoot.rotation = mapRotation * Math.PI / 2;
+  const label = document.querySelector<HTMLElement>("#rotation-label");
+  if (label) label.textContent = String(mapRotation * 90) + "°";
+  setStatus("Obrót mapy: " + (mapRotation * 90) + "°. Siatka i teren pozostają wyrównane z obiektami.");
 }
 
 function saveControlGroup(number: number): void {
@@ -664,7 +709,7 @@ document.querySelector<HTMLButtonElement>("#speed-up")?.addEventListener("click"
 });
 
 document.querySelector<HTMLButtonElement>("#help-button")?.addEventListener("click", () => {
-  setStatus("LPM: zaznacz / przeciągnij prostokąt. Shift: dodaj, Ctrl: przełącz. PPM: ruch lub atak. Środkowy przycisk: przesuwanie mapy. A: atak w ruchu, S: stop, H: obrona, Ctrl+1–9: grupy.");
+  setStatus("LPM: zaznacz / przeciągnij prostokąt. Shift: dodaj, Ctrl: przełącz. PPM: ruch lub atak. Środkowy przycisk: przesuwanie mapy. X/C: obrót mapy o 90°. A: atak w ruchu, S: stop, H: obrona, Ctrl+1–9: grupy.");
 });
 
 document.querySelectorAll<HTMLButtonElement>("[data-command-global]").forEach((button) => {
@@ -695,6 +740,8 @@ window.addEventListener("keydown", (event) => {
   if (key === "h") holdUnits();
   if (key === "b" && !paused) setMode("build");
   if (key === "p") togglePause();
+  if (key === "x") rotateMap(1);
+  if (key === "c") rotateMap(-1);
   if (key === "+" || key === "=") { setGameSpeed(simulation, simulation.speed + 5); updateSpeedLabel(); }
   if (key === "-") { setGameSpeed(simulation, simulation.speed - 5); updateSpeedLabel(); }
   if (key === "escape") setMode("select");

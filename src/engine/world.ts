@@ -1,5 +1,6 @@
 import { Container } from "pixi.js";
 import { addGlyph, addWord } from "./glyph";
+import { createWorldGrid, worldPositionForCell, type WorldGrid } from "./grid";
 
 export type EntityKind = "building" | "unit";
 export type Faction = "player" | "enemy" | "neutral";
@@ -40,6 +41,7 @@ export interface WorldLayers {
 export interface WorldState {
   entities: GameEntity[];
   layers: WorldLayers;
+  grid: WorldGrid;
 }
 
 const WORLD_WIDTH = 2600;
@@ -224,6 +226,45 @@ function addTerrain(layers: WorldLayers): void {
   }
 }
 
+function addGridTerrain(layers: WorldLayers, grid: WorldGrid): void {
+  const symbols: Record<string, { char: string; color: string; alpha: number }> = {
+    sand: { char: "·", color: "#b69a70", alpha: 0.20 },
+    oasis: { char: "❧", color: "#80c66f", alpha: 0.52 },
+    forest: { char: "♣", color: "#276d3b", alpha: 0.56 },
+    water: { char: "≈", color: "#55b6df", alpha: 0.72 },
+    hill: { char: "﹏", color: "#c5a36d", alpha: 0.43 },
+    cliff: { char: "▲", color: "#c0cbd2", alpha: 0.70 },
+    stone: { char: "◈", color: "#d0d5d9", alpha: 0.74 },
+    iron: { char: "◆", color: "#c98257", alpha: 0.78 },
+    tar: { char: "◉", color: "#384344", alpha: 0.72 },
+    moat: { char: "⌁", color: "#4aa9d5", alpha: 0.8 }
+  };
+
+  for (const tile of grid.tiles) {
+    const point = worldPositionForCell(grid, tile.col, tile.row);
+    if (!point || point.x < 0 || point.x > WORLD_WIDTH || point.y < 0 || point.y > WORLD_HEIGHT) continue;
+    const mark = symbols[tile.terrain] ?? symbols.sand!;
+    addGlyph(layers.terrain, {
+      char: mark.char,
+      x: point.x,
+      y: point.y,
+      size: tile.terrain === "sand" ? 7 : 10,
+      color: mark.color,
+      alpha: mark.alpha
+    });
+    if (tile.terrain === "cliff") {
+      addGlyph(layers.terrain, {
+        char: "▰",
+        x: point.x,
+        y: point.y + 8,
+        size: 12,
+        color: "#667783",
+        alpha: 0.55
+      });
+    }
+  }
+}
+
 function makeKeep(parent: Container, x: number, y: number): Container {
   const group = new Container();
   parent.addChild(group);
@@ -349,7 +390,9 @@ export function createWorld(root: Container): WorldState {
   };
   root.addChild(layers.terrain, layers.details, layers.structures, layers.actors, layers.effects);
 
+  const grid = createWorldGrid();
   addTerrain(layers);
+  addGridTerrain(layers, grid);
   const entities: GameEntity[] = [];
 
   const keepX = 1190;
@@ -384,7 +427,7 @@ export function createWorld(root: Container): WorldState {
   const raiders = makeUnit(layers.actors, 1890, 945, 3);
   entities.push(entity(raiders, "raiders", "Banda rozbójników", "unit", "Wrogi oddział grasujący przy trakcie. Czerwone sztandary oznaczają nieprzyjaciela.", "ROZBÓJNICY · WROGI ODDZIAŁ", 1890, 945, 100, 9, "enemy", "raiders"));
 
-  return { entities, layers };
+  return { entities, layers, grid };
 }
 
 export function createWatchtower(parent: Container, x: number, y: number, index: number): GameEntity {

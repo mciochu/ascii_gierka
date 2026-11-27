@@ -5,13 +5,13 @@ import { createWatchtower, createWorld, WORLD_SIZE, type GameEntity } from "./en
 
 type Mode = "select" | "move" | "build";
 
-const viewport = document.querySelector<HTMLDivElement>("#map-viewport");
-const statusMessage = document.querySelector<HTMLElement>("#status-message");
-const modeLabel = document.querySelector<HTMLElement>("#mode-label");
-const mapHint = document.querySelector<HTMLElement>("#map-hint");
-const zoomLabel = document.querySelector<HTMLElement>("#zoom-label");
-const selectionContent = document.querySelector<HTMLElement>("#selection-content");
-const inspector = document.querySelector<HTMLElement>(".inspector");
+const viewport = document.querySelector<HTMLDivElement>("#map-viewport")!;
+const statusMessage = document.querySelector<HTMLElement>("#status-message")!;
+const modeLabel = document.querySelector<HTMLElement>("#mode-label")!;
+const mapHint = document.querySelector<HTMLElement>("#map-hint")!;
+const zoomLabel = document.querySelector<HTMLElement>("#zoom-label")!;
+const selectionContent = document.querySelector<HTMLElement>("#selection-content")!;
+const inspector = document.querySelector<HTMLElement>(".inspector")!;
 
 if (!viewport || !statusMessage || !modeLabel || !mapHint || !zoomLabel || !selectionContent || !inspector) {
   throw new Error("Game interface is missing required elements.");

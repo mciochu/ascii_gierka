@@ -1,4 +1,4 @@
-# DOMINIUM — plan realizacji specyfikacji Twierdzy: Krzyżowiec
+# DOMINIUM — realizacja specyfikacji Twierdzy: Krzyżowiec
 
 Źródło wymagań: przekazany plik „Specyfikacja systemu gry: Twierdza: Krzyżowiec (Stronghold Crusader, 2002 / HD)” z 2026-11-27.
 
@@ -20,7 +20,7 @@ Zakres: przestrzeń i fizyka mapy z sekcji 1 oraz podstawy geometrii potrzebne d
 - Wysokość terenu oraz przeszkody nieprzechodnie.
 - Wyznaczanie tras po siatce z omijaniem wody i klifów; walidacja miejsca budowy.
 - Przygotowanie siatki pod późniejsze fosy, mury, bramy i fizyczne zasoby.
-**Status: ukończony.**
+**Status: ukończony w zakresie fundamentu mapy; audyt techniczny PASS.** Nie oznacza to ukończenia całej sekcji 1 pierwotnego dokumentu — fizyczne magazyny są w etapie 4, a Lord i warunek porażki w etapie 5.
 
 ### Etap 2 — kompletny HUD i klasyczne sterowanie
 Zakres: sekcje 2 i 3 specyfikacji.
@@ -42,7 +42,7 @@ Zakres: sekcja 4 specyfikacji.
 **Status: częściowe podstawy ekonomii są już w kodzie; pełny cykl życia mieszkańców pozostaje do wykonania.**
 
 ### Etap 4 — magazyny, logistyka i łańcuchy produkcyjne
-Zakres: sekcja 5 specyfikacji.
+Zakres: sekcja 5 specyfikacji oraz fizyczne zasoby z sekcji 1.
 - Fizyczny Skład, Spichlerz i Zbrojownia z pojemnością pól; złoto pozostaje zasobem globalnym.
 - Dostawy piesze, trasy pracowników, czas produkcji zależny od odległości i blokada przy pełnym magazynie.
 - Rozbudowa magazynów modułami i sprzedaż nadwyżek.
@@ -52,7 +52,7 @@ Zakres: sekcja 5 specyfikacji.
 **Status: do wykonania.**
 
 ### Etap 5 — twierdza, fortyfikacje i pełne wojsko
-Zakres: sekcje 6 i 7 oraz warunki zwycięstwa/porażki z sekcji 1.
+Zakres: sekcje 6 i 7 oraz Lord/warunki zwycięstwa i porażki z sekcji 1.
 - Mury, wieże, bramy, schody, mosty, szczelność zamku i przejmowanie bram.
 - Fosy kopane przez jednostki, zasypywanie, wysokość i bonusy fortyfikacji.
 - Smoła, ogień, rozprzestrzenianie pożarów, gaszenie, wrzący olej i zaraza.
@@ -66,7 +66,7 @@ Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
 - FSM pracowników: pobranie surowca → transport → przetworzenie → dostawa → ewentualna przerwa.
 - Oczekiwanie przy budynku, gdy brakuje surowca albo miejsca w magazynie.
 - Lordowie AI z planami zamków, własną ekonomią, handlem, rekrutacją i realnymi kosztami.
-- Nękające oddziały, progi oblężenia, machinie oblężnicze i reakcje obronne.
+- Nękające oddziały, progi oblężenia, machiny oblężnicze i reakcje obronne.
 - Alerty Skryby i komunikaty tekstowe/głosowe dla stanów krytycznych.
 - Integracja miesięcznego bilansu z pracą budynków, magazynami, populacją, wojskiem i AI; końcowe testy regresji.
 **Status: do wykonania.**
@@ -78,15 +78,43 @@ Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
 - Testy symulacji miesięcznej oraz skrypt weryfikacji TypeScript + build.
 - Prototyp PixiJS, wybieranie obiektów, grupy kontrolne, ruch, uproszczona walka i wieża strażnicza.
 
-## Dziennik wdrożeń
+## Dziennik audytu i wdrożeń
 
 ### Etap 1 — fundament mapy i świata (2026-11-27)
-- Dodano `src/engine/grid.ts`: logiczna siatka 100×100 z izometrycznym mapowaniem komórek na współrzędne świata.
-- Dodano typy terenu: piasek, oaza, las, woda, wzgórza, klify, złoża kamienia, żelaza i smoły; pola mają wysokość oraz flagi przechodniości i zabudowy.
-- Mapa jest renderowana znakami Unicode; wysokości wpływają na pozycję znaków terenu.
-- Dodano obrót mapy w czterech kierunkach skrótami X/C; kamera, zoom, hit-test i zaznaczanie przeliczają współrzędne przy obrocie.
-- Rozkazy ruchu i ataku w ruchu korzystają z tras po siatce. Woda i klify blokują przejście, a trasa omija przeszkody.
-- Budowa wieży odrzuca teren nieprzeznaczony pod zabudowę.
-- Dodano testy geometrii, typów terenu, wysokości, blokad, tras i obrotu mapy.
-- Weryfikacja: 14/14 testów PASS, TypeScript PASS, Vite build PASS.
-- Ograniczenia, które pozostają na później: brak jeszcze stawiania/zasypywania fos, budowy murów i pełnej obsługi terenu przez gospodarkę; brak fizycznego Lorda i reguły porażki; teren zasobów nie jest jeszcze połączony z pełnymi łańcuchami produkcyjnymi.
+
+**Implementacja**
+- `src/engine/grid.ts`: logiczna siatka 100×100 pól, izometryczne mapowanie komórka ↔ współrzędne świata.
+- Kafelek ma wymiary projekcyjne 26×18; przesunięcie wysokości wynosi 3 jednostki na poziom. Środek siatki jest wspólnym pivotem kamery.
+- Wszystkie 10 000 środków pól mieści się w granicach świata 2600×1850, są unikalne i dokładnie mapują się w obie strony.
+- Rodzaje terenu: piasek, oaza, las, woda, wzgórza, klify, złoża kamienia, żelaza i smoły. Każde pole przechowuje wysokość, przechodniość i możliwość zabudowy.
+- Obszary lasu, oaz i rzeka są umieszczone wewnątrz rombowej granicy mapy; początkowe budynki i oddziały znajdują się na przechodnich polach.
+- Mapa jest renderowana znakami Unicode. Zwykły piasek ma rzadsze znaczniki, żeby nie tworzyć osobnego obiektu tekstowego dla każdego domyślnego pola.
+- Obrót X/C działa w czterech kierunkach; wspólne przekształcenia kamery są używane dla renderowania, hit-testu i zaznaczania.
+- Ruch, atak w ruchu i pościg w walce korzystają z tras po siatce. Woda i klify blokują ruch; diagonalne przejście nie może ścinać narożników blokowanych pól.
+- Po zakończeniu lokalnej walki oddział z rozkazem ataku w ruchu wraca do pierwotnego celu.
+- Budowanie wieży jest przyciągane do środka pola i odrzuca teren niedozwolony.
+- W pauzie zatrzymuje się symulacja i ruch jednostek, ale nadal można przesuwać kamerę.
+
+**Usterki wykryte w audycie i poprawione**
+- Pierwotne kafle 64×32 powodowały, że tylko 4 754 z 10 000 środków pól znajdowały się w granicach mapy. Zmieniono geometrię na 26×18 i wycentrowano pivot.
+- Zbyt duży krok wysokości powodował nakładanie się środków sąsiednich pól. Zmniejszono go do 3 i dodano wyczerpujący test mapowania wszystkich komórek.
+- Zwykły rozkaz ataku wcześniej pościgał cel po prostej. Pościg został podłączony do wyszukiwania trasy po siatce.
+- Dekoracyjne lasy i rzeka częściowo leżały poza granicą siatki. Przesunięto je i zsynchronizowano z logicznym terenem.
+- Początkowy wrogi oddział stał na nowym polu wodnym. Przeniesiono go na pole przechodnie i dodano test pozycji wszystkich obiektów startowych.
+- Nawigacja kamery strzałkami działa również podczas pauzy; sama symulacja pozostaje zatrzymana.
+
+**Wynik testów**
+- 21/21 testów automatycznych PASS (w tym 12 testów siatki/kamery/tras oraz wcześniejsze testy symulacji ekonomicznej).
+- TypeScript PASS.
+- Vite production build PASS.
+- Audyt siatki: 10 000/10 000 unikalnych środków pól, 0 poza mapą, 0 błędów mapowania.
+- 9 196 pól przechodnich w jednej spójnej sieci; trasy do lasu, oazy i złóż są osiągalne.
+- Wszystkie początkowe obiekty leżą na przechodnich polach.
+- Weryfikacja obejmuje logikę i build. Ręczny test obrazu w przeglądarce nie został wykonany na VPS, ponieważ uruchomiony headless Chromium nie startuje bez systemowej biblioteki `libatk-1.0.so.0`.
+
+**Granice tego etapu — nie oznaczać jako gotowe**
+- Fosa jest przewidziana jako typ terenu w modelu, ale nie ma jeszcze wyznaczania, kopania ani zasypywania; to etap 5.
+- Fizyczne magazyny, pojemność pól i dostawy pracowników nie są jeszcze wdrożone; to etap 4.
+- Lord, jego samoobrona, śmierć i warunek porażki nie są jeszcze wdrożone; to etap 5.
+- Zasoby złoża są oznaczone na mapie, ale wydobycie i łańcuchy transportu są etapem 4.
+- Pełne UI obrotu i menu gestów kamery, minimapa, HUD i pozostałe skróty są etapem 2.

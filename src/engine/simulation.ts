@@ -30,9 +30,9 @@ export const MIN_GAME_SPEED = 20;
 export const MAX_GAME_SPEED = 90;
 
 export const TAX_RULES: Record<TaxLevel, { label: string; popularity: number; goldPerVillager: number; bribe: number }> = {
-  "bribe-generous": { label: "Hojna łapówka", popularity: 7, goldPerVillager: -1.2, bribe: 1.2 },
-  "bribe-large": { label: "Duża łapówka", popularity: 5, goldPerVillager: -0.8, bribe: 0.8 },
-  "bribe-small": { label: "Mała łapówka", popularity: 3, goldPerVillager: -0.4, bribe: 0.4 },
+  "bribe-generous": { label: "Hojna łapówka", popularity: 7, goldPerVillager: 0, bribe: 0 },
+  "bribe-large": { label: "Duża łapówka", popularity: 5, goldPerVillager: 0, bribe: 0 },
+  "bribe-small": { label: "Mała łapówka", popularity: 3, goldPerVillager: 0, bribe: 0 },
   none: { label: "Brak podatków", popularity: 1, goldPerVillager: 0, bribe: 0 },
   low: { label: "Niskie podatki", popularity: -2, goldPerVillager: 0.6, bribe: 0 },
   medium: { label: "Średnie podatki", popularity: -4, goldPerVillager: 0.8, bribe: 0 },
@@ -71,7 +71,7 @@ export function settleMonth(state: SimulationState): MonthlyReport {
   const foodConsumed = Math.min(state.food, requestedFood);
   state.food = Math.max(0, state.food - foodConsumed);
   const shortage = requestedFood > 0 && foodConsumed + 0.0001 < requestedFood;
-  const rationModifier = shortage || state.food <= 0 && requestedFood > 0
+  const rationModifier = shortage
     ? -8
     : ({ 0: -8, 0.5: -4, 1: 0, 1.5: 4, 2: 8 } as Record<RationLevel, number>)[effectiveRation];
   const varietyModifier = effectiveRation > 0 ? Math.max(0, Math.min(3, state.foodTypes - 1)) : 0;
@@ -82,7 +82,9 @@ export function settleMonth(state: SimulationState): MonthlyReport {
   const religionPassive = (state.churches > 0 ? 1 : 0) + (state.cathedrals > 0 ? 2 : 0);
   const religionBlessing = Math.round(Math.max(0, Math.min(1, state.blessedShare)) * 8);
   const fearModifier = Math.max(-5, Math.min(5, Math.trunc(state.fear)));
-  const popularityChange = rationModifier + varietyModifier + tax.popularity + beerBonus + religionPassive + religionBlessing + fearModifier;
+  const bribeUnpriced = state.tax.startsWith("bribe-");
+  const popularityChange = rationModifier + varietyModifier + (bribeUnpriced ? 0 : tax.popularity) + beerBonus + religionPassive + religionBlessing + fearModifier;
+  if (bribeUnpriced) messages.push("Łapówki wymagają jeszcze ustalenia kosztu w złocie — bonus nie został naliczony.");
   const taxes = state.population * tax.goldPerVillager;
   state.gold = Math.max(0, state.gold + taxes);
   state.popularity = Math.max(0, Math.min(100, state.popularity + popularityChange));

@@ -3,7 +3,15 @@ import "./style.css";
 import { addGlyph } from "./engine/glyph";
 import { createWatchtower, createWorld, WORLD_SIZE, type GameEntity } from "./engine/world";
 import { advanceSimulation, createSimulation, setGameSpeed } from "./engine/simulation";
-import { findGridPath, isBuildableAtWorld, rotateOffset, worldPositionForCell, worldToCell } from "./engine/grid";
+import {
+  findGridPath,
+  GRID_PIVOT,
+  isBuildableAtWorld,
+  viewportToWorld,
+  worldPositionForCell,
+  worldToCell,
+  worldToViewport
+} from "./engine/grid";
 
 type ToolMode = "select" | "attack-move" | "build";
 type PointerSession = {
@@ -65,6 +73,7 @@ const entities = world.entities;
 
 let zoom = 0.62;
 let mapRotation = 0;
+const MAP_PIVOT = GRID_PIVOT;
 let mode: ToolMode = "select";
 let paused = false;
 const simulation = createSimulation();
@@ -227,11 +236,15 @@ function toggleSelection(entity: GameEntity): void {
 
 function screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
   const rect = canvas.getBoundingClientRect();
-  const offset = rotateOffset({
-    x: (screenX - rect.left - worldRoot.position.x) / zoom,
-    y: (screenY - rect.top - worldRoot.position.y) / zoom
-  }, -mapRotation);
-  return { x: 1190 + offset.x, y: 915 + offset.y };
+  return viewportToWorld(
+    { x: screenX - rect.left, y: screenY - rect.top },
+    {
+      position: { x: worldRoot.position.x, y: worldRoot.position.y },
+      pivot: MAP_PIVOT,
+      zoom,
+      quarterTurns: mapRotation
+    }
+  );
 }
 
 function findEntityAt(x: number, y: number): GameEntity | null {
@@ -635,7 +648,12 @@ function zoomAt(nextZoom: number, clientX?: number, clientY?: number): void {
     clientX === undefined ? rect.left + px : clientX,
     clientY === undefined ? rect.top + py : clientY
   );
-  const offset = rotateOffset({ x: (focus.x - 1190) * clamped, y: (focus.y - 915) * clamped }, mapRotation);
+  const offset = worldToViewport(focus, {
+    position: { x: 0, y: 0 },
+    pivot: MAP_PIVOT,
+    zoom: clamped,
+    quarterTurns: mapRotation
+  });
   zoom = clamped;
   worldRoot.scale.set(zoom);
   worldRoot.position.set(px - offset.x, py - offset.y);
@@ -644,7 +662,7 @@ function zoomAt(nextZoom: number, clientX?: number, clientY?: number): void {
 
 function centerCamera(): void {
   zoom = 0.62;
-  worldRoot.pivot.set(1190, 915);
+  worldRoot.pivot.set(MAP_PIVOT.x, MAP_PIVOT.y);
   worldRoot.rotation = mapRotation * Math.PI / 2;
   worldRoot.scale.set(zoom);
   worldRoot.position.set(viewport.clientWidth / 2, viewport.clientHeight / 2);
@@ -802,6 +820,14 @@ function moveUnit(unit: GameEntity, deltaSeconds: number): void {
   if (marker) marker.position.set(unit.x, unit.y);
 }
 
+function setGridRoute(unit: GameEntity, destination: { x: number; y: number }): boolean {
+  const route = findGridPath(world.grid, unit, destination);
+  if (!route) return false;
+  unit.movementQueue = route.slice(1);
+  unit.moveTarget = route[0] ?? { ...destination };
+  return true;
+}
+
 function updateCombat(deltaSeconds: number): void {
   const defeated: GameEntity[] = [];
   for (const unit of entities) {
@@ -816,12 +842,17 @@ function updateCombat(deltaSeconds: number): void {
       if (nearestEnemy) {
         unit.attackTargetId = nearestEnemy.id;
         unit.moveTarget = undefined;
+        unit.movementQueue = [];
       }
     }
 
     const target = findTarget(unit.attackTargetId);
     if (!target) {
       unit.attackTargetId = undefined;
+      // Resume the original attack-move destination after the local threat is gone.
+      if (unit.attackMoveTarget && !unit.moveTarget && (unit.movementQueue?.length ?? 0) === 0) {
+        setGridRoute(unit, unit.attackMoveTarget);
+      }
       continue;
     }
 
@@ -830,12 +861,13 @@ function updateCombat(deltaSeconds: number): void {
     const distance = Math.hypot(dx, dy);
     const range = unit.attackRange ?? 52;
     if (distance > range) {
-      unit.moveTarget = {
-        x: target.x - (dx / Math.max(distance, 1)) * (range * 0.65),
-        y: target.y - (dy / Math.max(distance, 1)) * (range * 0.65)
-      };
+      // Combat pursuit uses the same terrain-aware grid path as ordinary movement.
+      if (!unit.moveTarget && (unit.movementQueue?.length ?? 0) === 0) {
+        setGridRoute(unit, { x: target.x, y: target.y });
+      }
     } else {
       unit.moveTarget = undefined;
+      unit.movementQueue = [];
       unit.attackCooldown = Math.max(0, (unit.attackCooldown ?? 0) - deltaSeconds);
       if (unit.attackCooldown === 0) {
         target.health -= unit.attackDamage ?? 9;
@@ -850,11 +882,10 @@ function updateCombat(deltaSeconds: number): void {
     if (index >= 0) entities.splice(index, 1);
     selectedIds.delete(entity.id);
     entity.group.destroy({ children: true });
-    setStatus(`${entity.name} został zniszczony.`);
+    setStatus(`\${entity.name} został zniszczony.`);
   }
   if (defeated.length > 0) updateSelection();
 }
-
 function panCamera(deltaSeconds: number): void {
   const speed = 520 * deltaSeconds;
   if (keysDown.has("arrowleft")) worldRoot.position.x += speed;
@@ -864,9 +895,10 @@ function panCamera(deltaSeconds: number): void {
 }
 
 app.ticker.add((ticker) => {
-  if (paused) return;
   const deltaSeconds = Math.min(ticker.deltaMS / 1000, 0.05);
+  // Camera navigation remains available during pause; simulation and unit motion do not.
   panCamera(deltaSeconds);
+  if (paused) return;
   const reports = advanceSimulation(simulation, deltaSeconds);
   if (reports.length) {
     const latest = reports[reports.length - 1]!;

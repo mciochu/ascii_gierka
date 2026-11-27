@@ -214,3 +214,27 @@ Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
 - Mnożnik wydajności pracy jest udostępniony i raportowany; jego wpływ na ilość przetwarzanych towarów zostanie włączony wraz z łańcuchami produkcji w etapie 4.
 - `recruitFromCampfire` realizuje zużycie bezrobotnego, natomiast pełny panel rekrutacji, typy jednostek, ceny i pobieranie uzbrojenia należą do etapu 5.
 - Rzeczywista liczebność mieszkańców jest rozdzielona od żołnierzy; żołnierze nie płacą podatków i nie zużywają racji.
+
+## Warstwa renderowania Effulgence — faza 1 (2026-11-27)
+
+**Wdrożona baza renderera GPU**
+- `src/engine/effulgence.ts` dodaje osobny moduł renderowania oparty na filtrach WebGL2 PixiJS. Końcowa scena mapy przechodzi przez filtr kompozycji glifowej i filtr końcowy; HTML-owy HUD pozostaje poza tym potokiem, więc jego tekst nie jest pikselizowany ani objęty bloomem.
+- Atlas ma 64 sloty: 16 poziomów rampy luminancji, 8 znaków krawędzi i 40 znaków specjalnych. Atlas jest tworzony raz przy uruchomieniu z monochromatycznego fontu monospace; nie dodano zewnętrznych bitmap, sprite'ów ani tekstur krajobrazu.
+- Shader wyznacza komórkę z rozmiaru 8×12 px (domyślnie), uwzględnia fazę kamery, próbkuje luminancję, wybiera poziom rampy i glif, oblicza gradient Sobela luminancji oraz stosuje dithering Bayera 4×4. Dla kolorystycznie wykrytych obszarów wody, ognia i zieleni opcjonalnie zmienia gęstość znaku z częstotliwością 8 Hz.
+- Końcowy shader stosuje wielopromieniową aproksymację poświaty jasnych glifów, krzywą ACES Filmic oraz przyciemnienie narożników o 12%. Siatka subpikselowa pozostaje wyłączona.
+- Opcje obrazu są dostępne w oknie Opcje: gęstość 6×9 / 8×12 / 10×15, bloom 0–150% (domyślnie 85%), jasność terenu 50–150% (100%) i migotanie 8 Hz. Ustawienia są zapisywane osobno w `localStorage` i nie modyfikują formatu zapisu rozgrywki.
+- HUD został ułożony w czterech blokach o docelowych proporcjach 14/46/22/18; minimapa jest osobnym czwartym blokiem. Stylistyka kontrolek przeszła na czarną bazę, chłodny cyjan, ostre ramki i brak gradientów dekoracyjnych w kontrolkach.
+
+**Granice tej fazy — nie oznaczać jako ukończone**
+- To nie jest jeszcze pełny ośmioprzebiegowy G-Buffer. Nie ma oddzielnych tekstur Albedo, NormalHeight, Emissive i EntityID; aktualny Sobel analizuje luminancję, a nie osobne bufory głębi, normalnych i identyfikatorów obiektów.
+- Oświetlenie kierunkowe i maksymalnie 64 światła punktowe z cullingiem, fizyczne wysokości i cienie materiałów, komplet ośmiu palet frakcji oraz dedykowane maski animowanych materiałów pozostają do implementacji.
+- Poświata w tej fazie jest filtrem wielopromieniowym, a nie pełnym Dual-Kawase z osobnymi poziomami downsample/upsample. Wyjściowa ścieżka nie jest jeszcze rzeczywistym wieloburowym HDR RGBA16F.
+- Jednostki i VFX nadal korzystają z dotychczasowych obiektów tekstowych PixiJS. Nie ma jeszcze osobnego hero/VFX passu, GPU instancingu klastrów, Hit-Flash 65 ms, rozpadu śmierci, pełnych świateł dynamicznych ani testu obciążeniowego 100 łuczników / 50 niewolników / 30 pól smoły / 3 machin.
+- Aktualny dobór migotania bazuje na heurystyce koloru, nie na flagach materiału. Faza kamery uwzględnia translację kontenera; pełna walidacja sub-cell lock przy zoomie, obrotach i wszystkich rozdzielczościach wymaga testu wizualnego.
+- Cel 60 FPS na zintegrowanym GPU nie został jeszcze zmierzony. Testy automatyczne nie zastępują pomiarów GPU ani ręcznej oceny migotania i czytelności sceny.
+- Przeglądarkowy test wizualny nie został wykonany na VPS, ponieważ środowisko headless Chromium nadal nie uruchamia się bez `libatk-1.0.so.0`. Nie zmieniano bibliotek systemowych serwera.
+
+**Wynik weryfikacji fazy 1**
+- Testy jednostkowe atlasu, 16 progów luminancji, mapowania kątów krawędzi, wielkości komórek i walidacji opcji renderera.
+- Testy struktury czterech bloków HUD i kontrolek ustawień Effulgence.
+- Pełny zestaw regresyjny etapów 1–4, TypeScript, build Vite oraz `git diff --check`.

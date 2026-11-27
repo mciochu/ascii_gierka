@@ -17,6 +17,24 @@ test("HUD ma wszystkie cztery bloki, księgę, narzędzia i minimapę", () => {
   assert.match(html, /id="hud-reveal"/);
 });
 
+test("Effulgence ma cztery bloki HUD w proporcjach 14/46/22/18 i osobną minimapę", () => {
+  assert.match(html, /class="bottom-hud"[\s\S]*class="build-categories"[\s\S]*class="context-panel"[\s\S]*class="scribe-panel"[\s\S]*class="minimap-panel"/);
+  assert.match(html, /id="minimap"/);
+  const scribeStart = html.indexOf('class="scribe-panel"');
+  const minimapStart = html.indexOf('class="minimap-panel"');
+  assert.ok(scribeStart >= 0 && minimapStart > scribeStart);
+  assert.doesNotMatch(html.slice(scribeStart, minimapStart), /id="minimap"/);
+});
+
+test("Opcje Effulgence sterują gęstością, bloomem, jasnością i migotaniem", () => {
+  assert.match(main, /data-effulgence-density/);
+  assert.match(main, /data-effulgence-bloom/);
+  assert.match(main, /data-effulgence-ambient/);
+  assert.match(main, /data-effulgence-shimmer/);
+  assert.match(main, /localStorage\.setItem\(EFFULGENCE_SETTINGS_KEY/);
+  assert.match(main, /effulgence\.update\(performance\.now\(\) \/ 1000\)/);
+});
+
 test("HUD działa bez starych referencji do bocznego inspektora i prawego przycisku rozkazów", () => {
   assert.doesNotMatch(main, /selection-content|\.inspector|handleContextCommand/);
   assert.match(main, /event\.button === 2[\s\S]{0,180}kind: "context"/);

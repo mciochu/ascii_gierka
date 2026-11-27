@@ -16,6 +16,8 @@ export interface SimulationState {
   unemployed: number;
   ration: RationLevel;
   tax: TaxLevel;
+  /** Null until the source specification provides an exact cost per villager. */
+  bribeCostPerVillager: number | null;
   foodTypes: number;
   taverns: number;
   beerBarrels: number;
@@ -47,7 +49,7 @@ export function createSimulation(): SimulationState {
     month: 1, speed: 40, monthProgress: 0,
     gold: 1240, food: 860, wood: 340, stone: 210,
     popularity: 65, population: 8, housing: 8, unemployed: 8,
-    ration: 1, tax: "none", foodTypes: 1, taverns: 0, beerBarrels: 0,
+    ration: 1, tax: "none", bribeCostPerVillager: null, foodTypes: 1, taverns: 0, beerBarrels: 0,
     churches: 0, cathedrals: 0, blessedShare: 0, fear: 0
   };
 }
@@ -56,6 +58,7 @@ export interface MonthlyReport {
   month: number;
   foodConsumed: number;
   taxes: number;
+  bribeCost: number;
   popularityChange: number;
   spawnedVillagers: number;
   leftVillagers: number;
@@ -66,27 +69,36 @@ export function settleMonth(state: SimulationState): MonthlyReport {
   const messages: string[] = [];
   const tax = TAX_RULES[state.tax];
   const effectiveRation: RationLevel = state.food <= 0 ? 0 : state.ration;
-  const consumptionPerVillager = effectiveRation * 0.2;
-  const requestedFood = state.population * consumptionPerVillager;
+  const consumptionPerVillager: Record<RationLevel, number> = { 0: 0, 0.5: 0.1, 1: 0.2, 1.5: 0.32, 2: 0.4 };
+  const requestedFood = state.population * consumptionPerVillager[effectiveRation];
   const foodConsumed = Math.min(state.food, requestedFood);
   state.food = Math.max(0, state.food - foodConsumed);
   const shortage = requestedFood > 0 && foodConsumed + 0.0001 < requestedFood;
   const rationModifier = shortage
     ? -8
     : ({ 0: -8, 0.5: -4, 1: 0, 1.5: 4, 2: 8 } as Record<RationLevel, number>)[effectiveRation];
-  const varietyModifier = effectiveRation > 0 ? Math.max(0, Math.min(3, state.foodTypes - 1)) : 0;
+  const varietyModifier = effectiveRation > 0 ? Math.max(0, Math.min(3, Math.trunc(state.foodTypes) - 1)) : 0;
   const beerCoverage = Math.min(1, (state.taverns * 30) / Math.max(1, state.population));
-  const beerBonus = state.beerBarrels > 0 && state.taverns > 0
+  const beerMonthlyUse = state.taverns > 0 ? 0.144 : 0;
+  const beerAvailable = state.beerBarrels + 0.000001 >= beerMonthlyUse && state.taverns > 0;
+  const beerBonus = beerAvailable
     ? (beerCoverage >= 1 ? 8 : beerCoverage >= 0.75 ? 6 : beerCoverage >= 0.5 ? 4 : beerCoverage >= 0.25 ? 2 : 0)
     : 0;
+  if (beerAvailable) state.beerBarrels = Math.max(0, state.beerBarrels - beerMonthlyUse);
   const religionPassive = (state.churches > 0 ? 1 : 0) + (state.cathedrals > 0 ? 2 : 0);
   const religionBlessing = Math.round(Math.max(0, Math.min(1, state.blessedShare)) * 8);
   const fearModifier = Math.max(-5, Math.min(5, Math.trunc(state.fear)));
-  const bribeUnpriced = state.tax.startsWith("bribe-");
-  const popularityChange = rationModifier + varietyModifier + (bribeUnpriced ? 0 : tax.popularity) + beerBonus + religionPassive + religionBlessing + fearModifier;
-  if (bribeUnpriced) messages.push("Łapówki wymagają jeszcze ustalenia kosztu w złocie — bonus nie został naliczony.");
-  const taxes = state.population * tax.goldPerVillager;
-  state.gold = Math.max(0, state.gold + taxes);
+  const isBribe = state.tax.startsWith("bribe-");
+  const bribeCost = isBribe && state.bribeCostPerVillager !== null
+    ? state.population * Math.max(0, state.bribeCostPerVillager)
+    : 0;
+  const bribePaid = isBribe && state.bribeCostPerVillager !== null && state.gold >= bribeCost;
+  const bribeBonus = bribePaid ? tax.popularity : 0;
+  const popularityChange = rationModifier + varietyModifier + (isBribe ? bribeBonus : tax.popularity) + beerBonus + religionPassive + religionBlessing + fearModifier;
+  if (isBribe && state.bribeCostPerVillager === null) messages.push("Koszt łapówki nie jest określony w specyfikacji — bonus nie został naliczony.");
+  else if (isBribe && !bribePaid) messages.push("Brak złota na łapówkę — bonus popularności nie został naliczony.");
+  const taxes = isBribe ? 0 : state.population * tax.goldPerVillager;
+  state.gold = Math.max(0, state.gold + taxes - (bribePaid ? bribeCost : 0));
   state.popularity = Math.max(0, Math.min(100, state.popularity + popularityChange));
 
   let spawnedVillagers = 0;
@@ -96,7 +108,7 @@ export function settleMonth(state: SimulationState): MonthlyReport {
     state.population += 1;
     state.unemployed += 1;
   } else if (state.popularity < 50 && state.population > 0) {
-    leftVillagers = Math.min(state.population, Math.max(1, Math.ceil((50 - state.popularity) / 10)));
+    leftVillagers = 1;
     state.population -= leftVillagers;
     state.unemployed = Math.max(0, state.unemployed - leftVillagers);
     messages.push("Popularność spadła poniżej 50 — mieszkańcy opuszczają osadę.");
@@ -104,7 +116,7 @@ export function settleMonth(state: SimulationState): MonthlyReport {
   if (state.food <= 0) messages.push("Spichlerz jest pusty. Racje żywnościowe spadły do zera.");
   if (state.unemployed >= 24) messages.push("Ognisko osiągnęło limit 24 bezrobotnych chłopów.");
   state.month += 1;
-  return { month: state.month, foodConsumed, taxes, popularityChange, spawnedVillagers, leftVillagers, messages };
+  return { month: state.month, foodConsumed, taxes, bribeCost: bribePaid ? bribeCost : 0, popularityChange, spawnedVillagers, leftVillagers, messages };
 }
 
 export function advanceSimulation(state: SimulationState, realDeltaSeconds: number): MonthlyReport[] {

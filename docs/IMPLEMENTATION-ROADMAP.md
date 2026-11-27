@@ -45,7 +45,7 @@ Dokument kontrolny względem specyfikacji przekazanej 2026-11-27. Statusy opisuj
 ## 4. Populacja i popularność
 - [x] Stan populacji, bazowe 8 miejsc, bezrobotni i limit ogniska 24.
 - [x] Miesięczne racje 0/0.5/1/1.5/2, zużycie i różnorodność.
-- [x] Tabela podatków/łapówek i przychód/koszt per mieszkaniec.
+- [x] Tabela podatków i przychód per mieszkaniec; bonusy łapówek są zdefiniowane, ale celowo wstrzymane do ustalenia kosztu złota, którego specyfikacja nie podaje.
 - [x] Podstawowy model piwa, religii i współczynnika strachu.
 - [ ] Fizyczne ognisko z paskiem postępu, automatyczne obsadzanie budynków i zwalnianie pracowników.
 - [ ] Rekrutacja zużywa chłopa; żołnierze wyłączeni z limitu chat i konsumpcji.
@@ -91,5 +91,5 @@ Dokument kontrolny względem specyfikacji przekazanej 2026-11-27. Statusy opisuj
 - Dodano `src/engine/simulation.ts` z deterministycznym stanem symulacji, prędkością 20–90, miesięcznym tickiem i rozliczeniem racji, różnorodności, podatków, piwa, religii i strachu.
 - Dodano liczniki miesiąca, populacji i popularności oraz kontrolę prędkości.
 - Pauza blokuje budowę i podstawowe rozkazy jednostek; zaznaczanie i inspekcja pozostają dostępne.
-- Uwaga: ten etap nie implementuje jeszcze pracowników, rzeczywistego magazynowania, budynków produkcyjnych ani rekrutacji. Wartości religii/piwa/strachu są na razie stanem symulacji, bez pełnych obiektów świata.
+- Uwaga: ten etap nie implementuje jeszcze pracowników, rzeczywistego magazynowania, budynków produkcyjnych ani rekrutacji. Wartości religii/piwa/strachu są na razie stanem symulacji, bez pełnych obiektów świata. Koszty łapówek pozostają nieaktywne, bo specyfikacja nie podaje ich wartości.
 - Weryfikacja: `npm run verify` — TypeScript PASS, Vite build PASS.

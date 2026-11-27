@@ -1,5 +1,5 @@
-import { Container, Text } from "pixi.js";
-import { addGlyph, addWord } from "./glyph";
+import { Container } from "pixi.js";
+import { addGlyph, addWord, type GlyphDisplay } from "./glyph";
 import { HUNTING_NODES, type ProductionType, type StorageType } from "./logistics";
 import { createWorldGrid, GRID_PIVOT, worldPositionForCell, type WorldGrid } from "./grid";
 
@@ -277,8 +277,8 @@ function addTerrain(layers: WorldLayers): void {
   }
 }
 
-function addGridTerrain(layers: WorldLayers, grid: WorldGrid): { glyph: Text; rise: number }[] {
-  const elevationMarks: { glyph: Text; rise: number }[] = [];
+function addGridTerrain(layers: WorldLayers, grid: WorldGrid): { glyph: GlyphDisplay; rise: number }[] {
+  const elevationMarks: { glyph: GlyphDisplay; rise: number }[] = [];
   const symbols: Record<string, { char: string; color: string; alpha: number }> = {
     sand: { char: "·", color: "#b69a70", alpha: 0.20 },
     oasis: { char: "❧", color: "#80c66f", alpha: 0.52 },

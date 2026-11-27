@@ -353,7 +353,9 @@ export function createEffulgenceRenderer(
   camera: Container
 ): EffulgenceRenderer {
   const atlas = createGlyphAtlas();
-  const cellSize = new Float32Array(cellSizeForDensity(DEFAULT_EFFULGENCE_SETTINGS.density));
+  const initialCellSize = cellSizeForDensity(DEFAULT_EFFULGENCE_SETTINGS.density);
+  const pixelRatio = app.renderer.resolution || 1;
+  const cellSize = new Float32Array([initialCellSize[0] * pixelRatio, initialCellSize[1] * pixelRatio]);
   const cameraPosition = new Float32Array([0, 0]);
   const glyphTime = { value: 0, type: "f32" as const };
   const terrainAmbient = { value: DEFAULT_EFFULGENCE_SETTINGS.terrainAmbient / 100, type: "f32" as const };
@@ -399,8 +401,8 @@ export function createEffulgenceRenderer(
   const setSettings = (nextSettings: EffulgenceSettings): void => {
     settings = normalizeEffulgenceSettings(nextSettings);
     const nextCell = cellSizeForDensity(settings.density);
-    cellSize[0] = nextCell[0];
-    cellSize[1] = nextCell[1];
+    cellSize[0] = nextCell[0] * pixelRatio;
+    cellSize[1] = nextCell[1] * pixelRatio;
     terrainAmbient.value = settings.terrainAmbient / 100;
     bloomIntensity.value = settings.bloomIntensity / 100;
     shimmerEnabled.value = settings.shimmerEnabled ? 1 : 0;
@@ -413,8 +415,8 @@ export function createEffulgenceRenderer(
     getSettings: () => ({ ...settings }),
     update(timeSeconds: number): void {
       glyphTime.value = Number.isFinite(timeSeconds) ? timeSeconds : 0;
-      cameraPosition[0] = camera.position.x;
-      cameraPosition[1] = camera.position.y;
+      cameraPosition[0] = camera.position.x * pixelRatio;
+      cameraPosition[1] = camera.position.y * pixelRatio;
     },
     destroy(): void {
       stage.filters = [];

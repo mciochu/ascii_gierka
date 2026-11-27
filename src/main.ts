@@ -1,4 +1,4 @@
-import { Application, Container, Text } from "pixi.js";
+import { Application, Container } from "pixi.js";
 import "./style.css";
 import {
   createEffulgenceRenderer,
@@ -7,7 +7,7 @@ import {
   normalizeEffulgenceSettings,
   type EffulgenceSettings
 } from "./engine/effulgence";
-import { addGlyph } from "./engine/glyph";
+import { addGlyph, flushGlyphAtlas, type GlyphDisplay } from "./engine/glyph";
 import {
   createWatchtower, createTownBuilding, createStorageBuilding, createProductionBuilding, createWorld, WORLD_SIZE,
   type GameEntity, type TownBuildingType, type LogisticsBuildingType
@@ -181,8 +181,8 @@ let buildPreviewLayer = new Container();
 buildPreviewLayer.zIndex = 1000;
 buildPreviewLayer.visible = false;
 worldRoot.addChild(buildPreviewLayer);
-let buildPreviewRing: Text | null = null;
-let buildPreviewGlyph: Text | null = null;
+let buildPreviewRing: GlyphDisplay | null = null;
+let buildPreviewGlyph: GlyphDisplay | null = null;
 let lastBuildPreviewClient: { x: number; y: number } | null = null;
 
 let zoom = 0.62;
@@ -199,7 +199,7 @@ let towerCounter = 0;
 let pointerSession: PointerSession | null = null;
 let lastClick: { id: string; at: number } | null = null;
 const selectedIds = new Set<string>();
-const selectionMarkers = new Map<string, Text>();
+const selectionMarkers = new Map<string, GlyphDisplay>();
 const controlGroups = new Map<number, string[]>();
 const keysDown = new Set<string>();
 let activeCategoryId = "castle";
@@ -217,12 +217,12 @@ const undoStack: string[] = [];
 let townBuildingCounter = 0;
 let stage4BuildingCounter = 0;
 let minimapRefresh = 0;
-const villagerViews = new Map<string, Text>();
-let campfireRingGreen: Text;
-let campfireRingRed: Text;
-let campfireGlyph: Text;
-let campfireLabel: Text;
-let campfireProgressGlyph: Text;
+const villagerViews = new Map<string, GlyphDisplay>();
+let campfireRingGreen: GlyphDisplay;
+let campfireRingRed: GlyphDisplay;
+let campfireGlyph: GlyphDisplay;
+let campfireLabel: GlyphDisplay;
+let campfireProgressGlyph: GlyphDisplay;
 function createCampfireVisuals(): void {
   campfireRingGreen = addGlyph(world.layers.details, { char: "◌", x: CAMPFIRE.x, y: CAMPFIRE.y, size: 62, color: "#68d47f", alpha: 0.9 });
   campfireRingRed = addGlyph(world.layers.details, { char: "◌", x: CAMPFIRE.x, y: CAMPFIRE.y, size: 62, color: "#ef625d", alpha: 0 });
@@ -2914,6 +2914,7 @@ function panCamera(deltaSeconds: number): void {
 
 app.ticker.add((ticker) => {
   const deltaSeconds = Math.min(ticker.deltaMS / 1000, 0.05);
+  flushGlyphAtlas();
   effulgence.update(performance.now() / 1000);
   // Camera navigation remains available during pause; simulation and unit motion do not.
   panCamera(deltaSeconds);

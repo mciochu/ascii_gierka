@@ -238,3 +238,25 @@ Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
 - Testy jednostkowe atlasu, 16 progów luminancji, mapowania kątów krawędzi, wielkości komórek i walidacji opcji renderera.
 - Testy struktury czterech bloków HUD i kontrolek ustawień Effulgence.
 - Pełny zestaw regresyjny etapów 1–4, TypeScript, build Vite oraz `git diff --check`.
+
+
+## Warstwa renderowania Effulgence — faza 2 (2026-11-27)
+
+**Migracja sceny z PixiJS Text do wspólnego atlasu glifów**
+- `src/engine/glyph.ts` nie tworzy już osobnego obiektu `PixiJS Text` dla każdej litery. Glify są rasteryzowane tylko raz na kombinację znaku i grubości fontu do wspólnego atlasu 16×32 (512 komórek).
+- Widoczne znaki są teraz sprite'ami/quadami korzystającymi z jednego `TextureSource`, więc PixiJS może łączyć je w partie renderowania. Nie są używane ilustracje, bitmapy terenu ani gotowe sprite sheety — atlas zawiera wyłącznie litery i znaki typograficzne.
+- Obiekt `GlyphDisplay` zachowuje API niezbędne aktualnej grze: pozycję, obrót, alpha, zmianę tekstu i zmianę koloru w panelu podglądu budowania. Obsługiwany jest także obrys glyphów przez dodatkowe quady.
+- Nowe znaki są dopisywane do atlasu na żądanie; aktualizacja tekstury jest grupowana do pojedynczego odświeżenia przed renderowaniem klatki.
+- Zmiana obejmuje teren, szczegóły, budynki, jednostki, cywilów, oznaczenia selekcji, podgląd budowania i etykiety liczbowe. Typy znaczników zostały zmienione z `Text` na `GlyphDisplay`.
+- Zachowana jest jedna wspólna mapa atlasu z obsługą znaków Unicode i polskich znaków diakrytycznych. Pojemność wynosi 512 odrębnych kombinacji znak/grubość; przekroczenie limitu korzysta z glifu zastępczego zamiast wywołać niekontrolowany wzrost tekstury.
+
+**Granice tej fazy — nadal nie oznaczać jako ukończone**
+- To jest migracja do atlasowych quadów i batchingu PixiJS, ale nie jest jeszcze własnym GPU instancingiem Passu 4. Każdy glif ma nadal obiekt Sprite w drzewie sceny; wymagane bufory instancji jednostek i cząsteczek nie zostały jeszcze dodane.
+- Nie powstały jeszcze osobne tekstury Passu 0 (`RT_Albedo`, `RT_NormalHeight`, `RT_Emissive`, `RT_EntityID`) ani właściwy Pass 1 ze światłem kierunkowym, gradientem wysokości, 64 światłami punktowymi i paletami frakcji.
+- Dotychczasowy filtr obrazu i przybliżony bloom pozostają na miejscu. Pełny ośmioprzebiegowy Render Graph, Dual-Kawase, HDR RGBA16F, materiały i maski animacji są nadal do wykonania.
+- Wymagania dotyczące budynków, machin, pełnego rosteru jednostek, pocisków, VFX, minimapy 32×16/40×20, raportów, dyplomacji, alertów i kompletnej macierzy kursorów nadal nie są spełnione.
+
+**Weryfikacja fazy 2**
+- Testy obejmują pojemność atlasu, dzielenie znaków Unicode/emoji i skalowanie odstępów glifów.
+- TypeScript, komplet testów i produkcyjny build Vite muszą przejść przed publikacją.
+- Test wizualny w przeglądarce VPS nadal jest ograniczony brakiem `libatk-1.0.so.0`; wynik HTTP nie jest uznawany za test wyglądu ani płynności.

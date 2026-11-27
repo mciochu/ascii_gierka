@@ -1,101 +1,92 @@
-# DOMINIUM — realizacja specyfikacji Twierdzy: Krzyżowiec
+# DOMINIUM — plan realizacji specyfikacji Twierdzy: Krzyżowiec
 
-Dokument kontrolny względem specyfikacji przekazanej 2026-11-27. Statusy opisują stan kodu, nie samą obecność elementu na ekranie.
+Źródło wymagań: przekazany plik „Specyfikacja systemu gry: Twierdza: Krzyżowiec (Stronghold Crusader, 2002 / HD)” z 2026-11-27.
 
 ## Zasady projektu
+
 - Świat i wszystkie obiekty pozostają renderowane znakami Unicode na czarnym tle; bez bitmap, sprite'ów i tekstur graficznych.
 - GitHub `mciochu/ascii_gierka`, gałąź `main`, jest źródłem kodu. Produkcja działa na Ubuntu VPS; nie używać Render ani Vercel.
-- Każdy etap: implementacja → `npm run verify` → wdrożenie → kontrola HTTP i regresji.
-- Nie oznaczać mechaniki jako gotowej, dopóki nie jest wykonywana przez symulację, a nie tylko prezentowana w HUD.
+- Każdy etap: implementacja → testy i TypeScript → build → wdrożenie → kontrola HTTP i regresji.
+- Nie oznaczać mechaniki jako gotowej, dopóki rzeczywiście działa w symulacji, a nie tylko prezentuje się w HUD.
+- Nie dopowiadać arbitralnie brakujących kosztów ani reguł. Wartości nieokreślone w specyfikacji pozostają konfigurowalne albo wyłączone.
 
-## Status ogólny
-- [x] Audyt bazowy: istniejący kod to prototyp PixiJS z mapą, czterema budynkami, trzema własnymi oddziałami, jednym wrogiem, ruchem, zaznaczaniem i prostą walką.
-- [x] Fundament zegara RTS: prędkość 20–90 (domyślnie 40), pauza i rozliczenia miesięczne.
-- [x] Fundament popularności i populacji: racje, podatki, różnorodność żywności, piwo, religia, strach, limit bezrobotnych i przyrost/odpływ mieszkańców.
-- [ ] Pełna zgodność z poniższymi sekcjami — prace etapowe, nieukończone.
+## Podział całej specyfikacji na 6 etapów
 
-## 1. Architektura i warunki rozgrywki
-- [ ] Izometryczna siatka logiczna i cztery obroty mapy.
-- [ ] Wysokości terenu, klify, woda i fosy jako elementy fizyczne.
-- [x] Czas rzeczywisty, regulacja 20–90, pauza i miesięczny tick.
-- [ ] Pauza blokuje wszystkie rozkazy (ruch, budowę, rekrutację, handel), pozostawiając nawigację i inspekcję.
-- [ ] Lord gracza/AI, samoobrona, śmierć Lorda, natychmiastowy warunek porażki i usunięcie jego domeny.
-- [ ] Fizyczne magazynowanie zasobów, pojemność pól, modułowa rozbudowa i blokowanie dostaw.
-- [ ] Złoto jako globalny zasób bez pojemności.
+### Etap 1 — fundament mapy i świata
+Zakres: przestrzeń i fizyka mapy z sekcji 1 oraz podstawy geometrii potrzebne do dalszych systemów.
+- Izometryczna siatka logiczna, mapowanie komórka ↔ współrzędne świata i ustalone rozmiary pól.
+- Cztery orientacje mapy, obrót co 90° bez rozjeżdżania obiektów, zaznaczeń i kamery.
+- Typy terenu: pustynia/piasek, oaza, las, wzgórza, klify, woda, złoża kamienia, żelaza i smoły.
+- Wysokość terenu oraz przeszkody nieprzechodnie.
+- Wyznaczanie tras po siatce z omijaniem wody i klifów; walidacja miejsca budowy.
+- Przygotowanie siatki pod późniejsze fosy, mury, bramy i fizyczne zasoby.
+**Status: ukończony.**
 
-## 2. Interfejs HUD
-- [ ] 6 kategorii budowania i komplet katalogu budowli.
-- [ ] Kontekstowy panel budowy, budynku i grup jednostek.
-- [ ] Skryba, księga raportów, popularność, złoto, populacja i mimika.
-- [ ] Raport miesięczny „W nadchodzącym miesiącu”, wykresy ekonomii i stan armii.
-- [ ] Undo, burzenie ze zwrotem 50%, ranking, dyplomacja, opcje zapisu/wczytania.
-- [ ] Minimapa z zasobami, wojskami i ramką kamery.
+### Etap 2 — kompletny HUD i klasyczne sterowanie
+Zakres: sekcje 2 i 3 specyfikacji.
+- Dolny HUD z sześcioma tarczami kategorii budowania oraz pełnym katalogiem budynków.
+- Środkowy panel kontekstowy dla budowy, budynków i grup jednostek.
+- Skryba, księga raportów, minimapa, ranking, dyplomacja, opcje, Undo i burzenie.
+- Klasyczny schemat LPM: wybór i wydawanie rozkazów zależnie od kontekstu.
+- Portrety typów jednostek, rozkazy specjalne, menu gestów kamery, minimapa i zakładki kamery.
+- Skróty opisane w dokumencie, edge-scroll, flatten, zoom oraz pełne zachowanie pauzy.
+**Status: do wykonania.**
 
-## 3. Sterowanie
-- [ ] Klasyczne jednoprzyciskowe LPM: zaznaczanie i rozkazy kontekstowe.
-- [x] Klik, dwuklik, box select, Shift-add i Ctrl-toggle.
-- [ ] LPM na portretach zawęża grupę, PPM usuwa typ z grupy.
-- [ ] PPM-gesture: radialne menu kamery, obrót, flatten, zoom, HUD.
-- [ ] Minimapa, edge-scroll, flatten, V, X/C, Z i zakładki kamery.
-- [x] Grupy kontrolne i podstawowe rozkazy ruchu/ataku/stop/obrona.
-- [ ] Pełne rozkazy: patrol, punkt zbiórki, wejście na mur, machiny, kopanie fosy, ostrzał punktu.
-- [ ] Skróty do budynków, powrót Shift, Alt+0–9 i Ctrl+Alt+0–9.
-- [ ] Szybkie rekrutowanie/handel paczkami.
+### Etap 3 — mieszkańcy, populacja i popularność
+Zakres: sekcja 4 specyfikacji.
+- Ognisko, limit 24 bezrobotnych, tempo przyrostu zależne od popularności i odejścia mieszkańców.
+- Chłopi obsadzają nieobsadzone budynki; rekrutacja zużywa chłopa, żołnierze nie zużywają żywności ani miejsc w chatach.
+- Pełny bilans racji i różnorodności, podatków/łapówek, piwa, religii i Fear Factor.
+- Rzeczywiste obiekty Dobrych i Złych Rzeczy, księża i wygasające błogosławieństwa.
+- Raport popularności „W nadchodzącym miesiącu” z rozbiciem wszystkich modyfikatorów.
+**Status: częściowe podstawy ekonomii są już w kodzie; pełny cykl życia mieszkańców pozostaje do wykonania.**
 
-## 4. Populacja i popularność
-- [x] Stan populacji, bazowe 8 miejsc, bezrobotni i limit ogniska 24.
-- [x] Miesięczne racje 0/0.5/1/1.5/2, zużycie i różnorodność.
-- [x] Tabela podatków i przychód per mieszkaniec; bonusy łapówek są zdefiniowane, ale celowo wstrzymane do ustalenia kosztu złota, którego specyfikacja nie podaje.
-- [x] Podstawowy model piwa, religii i współczynnika strachu.
-- [ ] Fizyczne ognisko z paskiem postępu, automatyczne obsadzanie budynków i zwalnianie pracowników.
-- [ ] Rekrutacja zużywa chłopa; żołnierze wyłączeni z limitu chat i konsumpcji.
-- [ ] Dokładne pokrycie gospód, stałe zużycie beczek i rzeczywiste błogosławieństwa księży.
-- [ ] Dobre/Złe Rzeczy liczone z populacji i znoszące się parami.
+### Etap 4 — magazyny, logistyka i łańcuchy produkcyjne
+Zakres: sekcja 5 specyfikacji.
+- Fizyczny Skład, Spichlerz i Zbrojownia z pojemnością pól; złoto pozostaje zasobem globalnym.
+- Dostawy piesze, trasy pracowników, czas produkcji zależny od odległości i blokada przy pełnym magazynie.
+- Rozbudowa magazynów modułami i sprzedaż nadwyżek.
+- Oaza, drzewa, jelenie, kamień, żelazo i smoła jako rzeczywiste zasoby mapy.
+- Wszystkie łańcuchy żywności, piwa, surowców, broni i pancerzy oraz zależności wejścia/wyjścia.
+- Targowisko z ręcznym handlem, stałymi cenami, spreadem i kontrolą wolnego miejsca.
+**Status: do wykonania.**
 
-## 5. Teren, logistyka i produkcja
-- [ ] Typy terenu: oaza, złoża kamienia, żelaza, smoła, las, pustynia.
-- [ ] Walidacja lokalizacji budowli i ograniczenia terenowe.
-- [ ] Piesze trasy pracowników, magazyny docelowe i czas produkcji zależny od dystansu.
-- [ ] Wszystkie łańcuchy: drewno, kamień+woły, żelazo, smoła, żywność, piwo, broń i pancerze.
-- [ ] Zależności surowców wejściowych, pracownicy, transport i blokada przy pełnym magazynie.
-- [ ] Targowisko: ręczny handel, stałe ceny, spread i pojemność magazynu.
+### Etap 5 — twierdza, fortyfikacje i pełne wojsko
+Zakres: sekcje 6 i 7 oraz warunki zwycięstwa/porażki z sekcji 1.
+- Mury, wieże, bramy, schody, mosty, szczelność zamku i przejmowanie bram.
+- Fosy kopane przez jednostki, zasypywanie, wysokość i bonusy fortyfikacji.
+- Smoła, ogień, rozprzestrzenianie pożarów, gaszenie, wrzący olej i zaraza.
+- Jednostki europejskie, arabskie i specjaliści; wymagania rekrutacji, brak regeneracji HP.
+- Machiny oblężnicze, artyleria wieżowa, trzy postawy, patrole, ostrzał punktu i friendly fire.
+- Lord jako pojedynczy władca na Siedzibie, samoobrona i natychmiastowa porażka po jego śmierci.
+**Status: istnieje tylko prototyp podstawowych oddziałów i uproszczonej walki; etap nie jest rozpoczęty.**
 
-## 6. Fortyfikacje, pożary i choroby
-- [ ] Szczelność murów, wież, bram i przeszkód naturalnych na siatce.
-- [ ] Automatyczne bramy, ręczne blokowanie i przejmowanie bramy.
-- [ ] Wysokość, bonusy zasięgu/ochrony, balisty i mangonele z załogą.
-- [ ] Plan fosy, kopanie przez wybrane jednostki i zasypywanie przez wroga.
-- [ ] Doły smołowe, podpalenia, rozprzestrzenianie ognia i gaszenie.
-- [ ] Wrzący olej i obrażenia obszarowe.
-- [ ] Zaraza, chmury obszarowe i leczenie przez aptekę.
+### Etap 6 — symulacja czasu rzeczywistego, cywile i AI
+Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
+- FSM pracowników: pobranie surowca → transport → przetworzenie → dostawa → ewentualna przerwa.
+- Oczekiwanie przy budynku, gdy brakuje surowca albo miejsca w magazynie.
+- Lordowie AI z planami zamków, własną ekonomią, handlem, rekrutacją i realnymi kosztami.
+- Nękające oddziały, progi oblężenia, machinie oblężnicze i reakcje obronne.
+- Alerty Skryby i komunikaty tekstowe/głosowe dla stanów krytycznych.
+- Integracja miesięcznego bilansu z pracą budynków, magazynami, populacją, wojskiem i AI; końcowe testy regresji.
+**Status: do wykonania.**
 
-## 7. Wojsko i walka
-- [ ] Wszystkie jednostki europejskie, arabskie i specjalistyczne oraz ich wymagania sprzętowe/złota.
-- [ ] Brak regeneracji HP, w tym Lorda.
-- [ ] Namiot oblężniczy, inżynierowie i sześć typów machin.
-- [ ] Trzy postawy (Stand Ground, Defensive, Aggressive) z odmienną logiką.
-- [ ] Stop, patrol, ostrzał punktu, rozformowanie.
-- [ ] Stacking bez twardej kolizji.
-- [ ] Friendly fire: strzały sojusznicze bez obrażeń, ale ogień/olej/głazy/zaraza ranią wszystkich.
+## Wcześniej wykonane fundamenty (nie są osobnym etapem)
 
-## 8. Pętla symulacji i AI
-- [ ] FSM chłopów: pobierz → przetransportuj → przetwórz → odnieś → przerwa.
-- [ ] Czekanie przy budynku przy braku surowca lub miejsca w magazynie.
-- [ ] Lordowie AI z planami zamków, pełną ekonomią i prawdziwymi kosztami.
-- [ ] Harass, progi oblężenia i konstruowanie machin.
-- [ ] Alerty tekstowe i głosowe, komunikaty o ekonomii/ataku/pożarze.
-- [x] Miesięczny tick dla podstawowego bilansu ekonomicznego i popularności.
-- [x] Dokładne zużycie racji z tabeli: 0 / 0.1 / 0.2 / 0.32 / 0.4 na chłopa; niedobór obniża modyfikator racji do −8.
-- [x] Stałe zużycie piwa 0.144 beczki na gospodę miesięcznie oraz progi bonusu 25/50/75/100%.
-- [x] Koszt łapówek jako jawna konfiguracja; bez wartości kosztu z dokumentu bonus jest zablokowany, a przy braku złota również nie działa.
-- [x] Klawisz P przełącza pauzę; w pauzie nie można wejść w tryb budowania ani ataku.
-- [x] Testy automatyczne symulacji uruchamiane przez `npm run verify`.
+- Zegar RTS z prędkością 20–90, domyślnie 40, pauzą P i miesięcznym tickiem.
+- Podstawowa symulacja racji, różnorodności żywności, podatków, piwa, religii, strachu, popularności i przyrostu/odpływu ludności.
+- Testy symulacji miesięcznej oraz skrypt weryfikacji TypeScript + build.
+- Prototyp PixiJS, wybieranie obiektów, grupy kontrolne, ruch, uproszczona walka i wieża strażnicza.
 
-## Dziennik etapów
-### Etap 1 — zegar i miesięczny bilans (2026-11-27)
-- Dodano `src/engine/simulation.ts` z deterministycznym stanem symulacji, prędkością 20–90, miesięcznym tickiem i rozliczeniem racji, różnorodności, podatków, piwa, religii i strachu.
-- Dodano liczniki miesiąca, populacji i popularności oraz kontrolę prędkości.
-- Pauza blokuje budowę i podstawowe rozkazy jednostek; zaznaczanie i inspekcja pozostają dostępne.
-- Uwaga: ten etap nie implementuje jeszcze pracowników, rzeczywistego magazynowania, budynków produkcyjnych ani rekrutacji. Wartości religii/piwa/strachu są na razie stanem symulacji, bez pełnych obiektów świata. Koszty łapówek pozostają nieaktywne, bo specyfikacja nie podaje ich wartości.
-- Weryfikacja po doprecyzowaniu reguł: 9/9 testów symulacji PASS, TypeScript PASS, Vite build PASS.
-- Nieukończone w tym etapie: fizyczne magazyny i transport pieszy, pełny cykl życia pracownika, budynki produkcyjne, wszystkie kategorie HUD, rekrutacja, AI, pełna izometria i mechaniki fortyfikacji.
+## Dziennik wdrożeń
+
+### Etap 1 — fundament mapy i świata (2026-11-27)
+- Dodano `src/engine/grid.ts`: logiczna siatka 100×100 z izometrycznym mapowaniem komórek na współrzędne świata.
+- Dodano typy terenu: piasek, oaza, las, woda, wzgórza, klify, złoża kamienia, żelaza i smoły; pola mają wysokość oraz flagi przechodniości i zabudowy.
+- Mapa jest renderowana znakami Unicode; wysokości wpływają na pozycję znaków terenu.
+- Dodano obrót mapy w czterech kierunkach skrótami X/C; kamera, zoom, hit-test i zaznaczanie przeliczają współrzędne przy obrocie.
+- Rozkazy ruchu i ataku w ruchu korzystają z tras po siatce. Woda i klify blokują przejście, a trasa omija przeszkody.
+- Budowa wieży odrzuca teren nieprzeznaczony pod zabudowę.
+- Dodano testy geometrii, typów terenu, wysokości, blokad, tras i obrotu mapy.
+- Weryfikacja: 14/14 testów PASS, TypeScript PASS, Vite build PASS.
+- Ograniczenia, które pozostają na później: brak jeszcze stawiania/zasypywania fos, budowy murów i pełnej obsługi terenu przez gospodarkę; brak fizycznego Lorda i reguły porażki; teren zasobów nie jest jeszcze połączony z pełnymi łańcuchami produkcyjnymi.

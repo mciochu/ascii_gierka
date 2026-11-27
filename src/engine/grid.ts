@@ -100,7 +100,7 @@ function terrainAt(point: WorldPoint, col: number, row: number): Pick<GridTile, 
   }
 
   if (FORESTS.some((area) => inEllipse(point, area))) {
-    return { terrain: "forest", elevation: 1, walkable: false, buildable: false };
+    return { terrain: "forest", elevation: 1, walkable: true, buildable: false };
   }
 
   if (inEllipse(point, { x: 480, y: 1190, rx: 205, ry: 115 }) ||
@@ -218,7 +218,7 @@ function nearestWalkable(grid: WorldGrid, origin: GridTile, radius: number): Gri
   return null;
 }
 
-/** Breadth-first grid route. Forests, water, cliffs and moats are impassable; diagonal corner-cutting is forbidden. */
+/** Breadth-first grid route. Water, cliffs and moats are impassable; diagonal corner-cutting is forbidden. */
 export function findGridPath(grid: WorldGrid, start: WorldPoint, destination: WorldPoint): WorldPoint[] | null {
   const startTile = worldToCell(grid, start);
   const targetTile = worldToCell(grid, destination);

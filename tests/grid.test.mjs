@@ -38,7 +38,7 @@ test('świat ma fizyczne typy terenu, zróżnicowaną wysokość i pola nieprzec
   assert.ok(terrain.has('tar'));
   assert.ok(grid.tiles.some((tile) => tile.elevation > 1));
   assert.ok(grid.tiles.some((tile) => tile.terrain === 'water' && !tile.walkable));
-  assert.ok(grid.tiles.some((tile) => tile.terrain === 'forest' && !tile.walkable));
+  assert.ok(grid.tiles.some((tile) => tile.terrain === 'forest' && tile.walkable && !tile.buildable));
   assert.ok(grid.tiles.some((tile) => tile.terrain === 'cliff' && !tile.buildable));
 });
 

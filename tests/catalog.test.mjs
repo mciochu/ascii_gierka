@@ -26,16 +26,23 @@ test("katalog zawiera rozpoznawalne pozycje każdej kategorii Stronghold", () =>
   assert.equal(allItems.size, 52);
 });
 
-test("budowle etapu 3 są aktywne razem z wieżą strażniczą", () => {
+test("budowle etapów 3 i 4 są aktywne, a mechaniki późniejszych etapów pozostają zablokowane", () => {
   const enabled = BUILD_CATEGORIES.flatMap((category) => category.items)
     .filter((item) => item.implemented)
     .map((item) => item.id);
-  assert.deepEqual(enabled, ["watchtower", "hovel", "chapel", "church", "cathedral", "good-things", "bad-things", "inn"]);
+  assert.deepEqual(enabled, [
+    "watchtower", "armory", "stockpile", "woodcutter", "quarry", "ox-tether", "iron-mine", "pitch-worker", "market",
+    "granary", "hunter", "apple-orchard", "dairy-farm", "wheat-farm", "hop-farm",
+    "hovel", "chapel", "church", "cathedral", "good-things", "bad-things",
+    "bowyer", "poleturner", "blacksmith", "tanner", "armourer", "mill", "bakery", "brewery", "inn"
+  ]);
   assert.equal(findBuildItem("watchtower")?.cost, "70 drewna · 30 kamienia");
   assert.equal(findBuildItem("hovel")?.cost, "6 drewna · +8 miejsc");
   assert.equal(findBuildItem("church")?.implemented, true);
   assert.equal(findBuildItem("inn")?.cost, "20 drewna · 100 złota · 1 karczmarz");
-  assert.equal(findBuildItem("market")?.implemented, undefined);
+  assert.equal(findBuildItem("market")?.implemented, true);
+  assert.equal(findBuildItem("quarry")?.implemented, true);
+  assert.equal(findBuildItem("wall-high")?.implemented, undefined);
 });
 
 test("wyszukiwanie kategorii i budowli zwraca właściwe pozycje", () => {

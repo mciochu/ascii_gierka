@@ -135,3 +135,41 @@ test("tryb budowania pokazuje zielony lub czerwony podgląd pola przed postawien
   assert.match(main, /buildPreviewLayer\.visible = mode === "build"/);
   assert.match(main, /const cost = TOWN_BUILD_COSTS\[type\]/);
 });
+
+
+test("etap 4 pokazuje fizyczne magazyny, pojemność i moduły obok magazynu", () => {
+  assert.match(main, /simulation\.logistics\.storages/);
+  assert.match(main, /storageUsedSlots\(storage\)/);
+  assert.match(main, /storageFreeSlots\(storage\)/);
+  assert.match(main, /function expandSelectedStorage\(/);
+  assert.match(main, /anchorTile\.col \+ dc/);
+  assert.match(main, /storageModuleId/);
+  assert.match(main, /Nie można zburzyć magazynu, który zawiera towary/);
+});
+
+test("etap 4 ma transport wejść i wyjść przez fizyczny magazyn, bez teleportowania surowców", () => {
+  assert.match(main, /pickupProductionInput\(simulation, villager\.id\)/);
+  assert.match(main, /completeProductionInputDelivery\(simulation, villager\.id\)/);
+  assert.match(main, /status === \"fetching-input/);
+  assert.match(main, /status === \"hauling-output/);
+  assert.match(main, /storeResource\(simulation, storage\.id/);
+  assert.match(main, /advanceProduction\(simulation, gameDelta\)/);
+});
+
+test("etap 4 udostępnia rynek ręczny i panel wyboru produkowanej broni", () => {
+  assert.match(main, /data-market-direction/);
+  assert.match(main, /tradeAtMarket\(simulation\.logistics/);
+  assert.match(main, /data-production-variant/);
+  assert.match(main, /data-storage-expand/);
+  assert.match(main, /result\.message/);
+});
+
+test("zapis etapu 4 zachowuje stan magazynów, produkcję, ładunki i migruje dawne liczniki", () => {
+  assert.match(main, /simulation: \{ \.\.\.simulation \}/);
+  assert.match(main, /normalizeLogistics\(savedSimulation\.logistics, legacyLogistics\)/);
+  assert.match(main, /stockpile\.inventory\.wood = Number\(savedSimulation\.wood\)/);
+  assert.match(main, /savedSimulation\.villagers/);
+  assert.match(main, /entry\.cargo/);
+  assert.match(main, /entry\.pendingOutputs/);
+  assert.match(main, /stage4BuildingCounter/);
+});

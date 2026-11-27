@@ -1,5 +1,6 @@
 import { Container, Text } from "pixi.js";
 import { addGlyph, addWord } from "./glyph";
+import { HUNTING_NODES, type ProductionType, type StorageType } from "./logistics";
 import { createWorldGrid, GRID_PIVOT, worldPositionForCell, type WorldGrid } from "./grid";
 
 export type EntityKind = "building" | "unit";
@@ -475,7 +476,13 @@ export function createWorld(root: Container): WorldState {
   const storeX = 875;
   const storeY = 1100;
   const store = makeStorehouse(layers.structures, storeX, storeY);
-  entities.push(entity(store, "storehouse", "Spichlerz", "building", "Centralny magazyn zapasów. Utrzymanie zapasów jest kluczem do długiego oblężenia.", "GOSPODARKA · MAGAZYN", storeX, storeY, 100));
+  entities.push(entity(store, "storehouse", "Spichlerz", "building", "Centralny magazyn żywności. Produkty trafiają tu pieszo z gospodarstw.", "GOSPODARKA · SPICHLERZ", storeX, storeY, 100));
+  const stockpile = createStorageBuilding(layers.structures, "stockpile", 0, 715, 1080);
+  entities.push(stockpile);
+  for (const [index, node] of HUNTING_NODES.entries()) {
+    addGlyph(layers.details, { char: "♞", x: node.x, y: node.y, size: 23, color: "#c2ad83", alpha: 0.88, stroke: "#10140f", strokeWidth: 1 });
+    addWord(layers.details, "JELENIE " + (index + 1), node.x, node.y + 20, 7, "#c2ad83", 0.72);
+  }
 
   const guard = makeUnit(layers.actors, 1090, 660, 0);
   entities.push(entity(guard, "guard", "Straż zamkowa", "unit", "Zawodowi obrońcy twierdzy. Utrzymują pozycję i czekają na rozkazy.", "PIKINIERZY · ODDZIAŁ", 1090, 660, 100, 12, "player", "pikemen"));
@@ -548,4 +555,72 @@ export function createTownBuilding(
     bad: "Obiekt Złych Rzeczy obniża współczynnik strachu i obrażenia, ale zwiększa wydajność pracy."
   };
   return entity(group, id, visual.name, "building", description[type], visual.role, x, y, 100);
+}
+
+export function createStorageBuilding(
+  parent: Container,
+  type: StorageType,
+  index: number,
+  x: number,
+  y: number,
+  module = false
+): GameEntity {
+  const group = new Container();
+  parent.addChild(group);
+  const visuals: Record<StorageType, { glyph: string; name: string; role: string; color: string; label: string }> = {
+    stockpile: { glyph: "▥", name: "Skład", role: "MAGAZYN · SUROWCE", color: "#d1b27b", label: "SKŁAD" },
+    granary: { glyph: "▤", name: "Spichlerz", role: "MAGAZYN · ŻYWNOŚĆ", color: "#c2a36a", label: "SPICHLERZ" },
+    armory: { glyph: "⚔", name: "Zbrojownia", role: "MAGAZYN · UZBROJENIE", color: "#9eb1c1", label: "ZBROJOWNIA" }
+  };
+  const visual = visuals[type];
+  addGlyph(group, { char: visual.glyph, x: 0, y: -8, size: 40, color: visual.color, weight: "bold", stroke: "#080a0b", strokeWidth: 1 });
+  addGlyph(group, { char: module ? "╫" : "═", x: 0, y: 12, size: 34, color: "#a9b5b9", alpha: 0.8 });
+  addWord(group, module ? "MODUŁ" : visual.label, 0, 34, 8, visual.color, 0.86);
+  group.position.set(x, y);
+  const id = module ? `${type}-module-${index}` : index === 0 && type === "stockpile" ? "stockpile" : `${type}-${index}`;
+  return entity(
+    group, id, module ? "Moduł · " + visual.name : visual.name, "building",
+    module ? "Dodatkowy moduł magazynu. Zwiększa liczbę dostępnych pól składowania." : "Fizyczny magazyn. Towary zajmują pola i muszą być dostarczone przez pracowników.",
+    module ? "MAGAZYN · ROZBUDOWA" : visual.role, x, y, 100
+  );
+}
+
+export type LogisticsBuildingType = ProductionType | "ox-tether" | "market";
+
+export function createProductionBuilding(
+  parent: Container,
+  type: LogisticsBuildingType,
+  index: number,
+  x: number,
+  y: number
+): GameEntity {
+  const group = new Container();
+  parent.addChild(group);
+  const visuals: Record<LogisticsBuildingType, { glyph: string; name: string; color: string; role: string }> = {
+    woodcutter: { glyph: "♧", name: "Chata drwala", color: "#82c486", role: "PRZEMYSŁ · DREWNO" },
+    quarry: { glyph: "◈", name: "Kamieniołom", color: "#bbc1c4", role: "PRZEMYSŁ · KAMIEŃ" },
+    "iron-mine": { glyph: "◆", name: "Kopalnia żelaza", color: "#d68b5c", role: "PRZEMYSŁ · ŻELAZO" },
+    "pitch-worker": { glyph: "◉", name: "Warsztat smolarza", color: "#b0a4a0", role: "PRZEMYSŁ · SMOŁA" },
+    "apple-orchard": { glyph: "♧", name: "Sad jabłoni", color: "#80c77d", role: "ROLNICTWO · JABŁKA" },
+    hunter: { glyph: "♜", name: "Chata myśliwego", color: "#c4b18a", role: "ROLNICTWO · MIĘSO" },
+    "dairy-farm": { glyph: "♉", name: "Farma mleczna", color: "#d8d0b1", role: "ROLNICTWO · SER" },
+    "wheat-farm": { glyph: "✧", name: "Farma pszenicy", color: "#d7bd65", role: "ROLNICTWO · PSZENICA" },
+    "hop-farm": { glyph: "❧", name: "Farma chmielu", color: "#80ba76", role: "ROLNICTWO · CHMIEL" },
+    mill: { glyph: "✣", name: "Młyn", color: "#d2b277", role: "PRZETWÓRSTWO · MĄKA" },
+    bakery: { glyph: "♨", name: "Piekarnia", color: "#dc9e63", role: "PRZETWÓRSTWO · CHLEB" },
+    brewery: { glyph: "♜", name: "Browar", color: "#d7b86f", role: "PRZETWÓRSTWO · PIWO" },
+    bowyer: { glyph: "⌒", name: "Łuczarz", color: "#c4a16d", role: "BROŃ · ŁUKI" },
+    poleturner: { glyph: "†", name: "Drzewcarz", color: "#b99b6a", role: "BROŃ · DRZEWCE" },
+    blacksmith: { glyph: "⚒", name: "Kowal", color: "#abb5bf", role: "BROŃ · METAL" },
+    tanner: { glyph: "▤", name: "Garbarz", color: "#bc8b61", role: "BROŃ · SKÓRY" },
+    armourer: { glyph: "♢", name: "Płatnerz", color: "#aebac7", role: "BROŃ · PANCERZE" },
+    "ox-tether": { glyph: "♉", name: "Uwiąz wołu", color: "#b9a17c", role: "TRANSPORT · KAMIEŃ" },
+    market: { glyph: "⚖", name: "Targowisko", color: "#d0b06e", role: "HANDEL · RĘCZNY" }
+  };
+  const visual = visuals[type];
+  addGlyph(group, { char: visual.glyph, x: 0, y: -8, size: 39, color: visual.color, weight: "bold", stroke: "#080a0b", strokeWidth: 1 });
+  addGlyph(group, { char: "═", x: 0, y: 12, size: 32, color: "#a9b5b9", alpha: 0.8 });
+  addWord(group, visual.name.toLocaleUpperCase("pl-PL").slice(0, 13), 0, 34, 7, visual.color, 0.84);
+  group.position.set(x, y);
+  return entity(group, `${type}-${index}`, visual.name, "building", "Pracownicy wykonują cykl produkcyjny i pieszo dostarczają towary do właściwego magazynu.", visual.role, x, y, 100);
 }

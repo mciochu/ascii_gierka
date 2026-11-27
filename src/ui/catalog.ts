@@ -37,7 +37,7 @@ export const BUILD_CATEGORIES: BuildCategory[] = [
       { id: "engineer-guild", name: "Gildia inżynierów", glyph: "⚒", note: unavailable },
       { id: "diggers-guild", name: "Gildia kopaczy", glyph: "⚒", note: unavailable },
       { id: "stables", name: "Stajnie", glyph: "♞", note: unavailable },
-      { id: "armory", name: "Zbrojownia", glyph: "⚔", note: unavailable },
+      { id: "armory", name: "Zbrojownia", glyph: "⚔", cost: "70 drewna · 25 kamienia", implemented: true, note: "Fizyczny magazyn na broń i pancerze." },
       { id: "dog-kennel", name: "Klatka z psami", glyph: "♟", note: unavailable },
       { id: "tar-pit", name: "Doły ze smołą", glyph: "◉", note: unavailable },
       { id: "wolf-pit", name: "Wilcze doły", glyph: "⌄", note: unavailable },
@@ -50,25 +50,25 @@ export const BUILD_CATEGORIES: BuildCategory[] = [
     id: "industry", name: "Przemysł", shortName: "PRZEMYSŁ", glyph: "⚒",
     description: "Surowce, transport i zaplecze gospodarcze.",
     items: [
-      { id: "stockpile", name: "Skład (Stockpile)", glyph: "▥", note: unavailable },
-      { id: "woodcutter", name: "Chata drwala", glyph: "♧", note: unavailable },
-      { id: "quarry", name: "Kamieniołom", glyph: "◈", note: unavailable },
-      { id: "ox-tether", name: "Wół (Ox Tether)", glyph: "♉", note: unavailable },
-      { id: "iron-mine", name: "Kopalnia żelaza", glyph: "◆", note: unavailable },
-      { id: "pitch-worker", name: "Warsztat smolarza", glyph: "◉", note: unavailable },
-      { id: "market", name: "Targowisko (Market)", glyph: "⚖", note: unavailable }
+      { id: "stockpile", name: "Skład (Stockpile)", glyph: "▥", cost: "60 drewna · 20 kamienia", implemented: true, note: "Magazyn surowców; rozbudowa przez dostawianie modułów." },
+      { id: "woodcutter", name: "Chata drwala", glyph: "♧", cost: "30 drewna", implemented: true, note: "Wymaga lasu w pobliżu. Drewno trafia pieszo do Składu." },
+      { id: "quarry", name: "Kamieniołom", glyph: "◈", cost: "50 drewna · 10 kamienia", implemented: true, note: "Stawiany na złożu kamienia. Wymaga 3 pracowników i działającego uwiązu wołu." },
+      { id: "ox-tether", name: "Wół (Ox Tether)", glyph: "♉", cost: "20 drewna", implemented: true, note: "Przypisz do kamieniołomu; zatrudnia dodatkowego pracownika i uruchamia transport bloków." },
+      { id: "iron-mine", name: "Kopalnia żelaza", glyph: "◆", cost: "45 drewna · 15 kamienia", implemented: true, note: "Stawiana na złożu żelaza. Sztabki trafiają do Składu." },
+      { id: "pitch-worker", name: "Warsztat smolarza", glyph: "◉", cost: "35 drewna · 5 kamienia", implemented: true, note: "Stawiany na bagnie smołowym. Beczki trafiają do Składu." },
+      { id: "market", name: "Targowisko (Market)", glyph: "⚖", cost: "80 drewna · 15 kamienia", implemented: true, note: "Ręczny zakup i sprzedaż towarów w paczkach po 1 lub 5 sztuk." }
     ]
   },
   {
     id: "agriculture", name: "Rolnictwo", shortName: "ROLNICTWO", glyph: "❧",
     description: "Produkcja żywności i gospodarstwa na oazie.",
     items: [
-      { id: "granary", name: "Spichlerz (Granary)", glyph: "▤", note: unavailable },
-      { id: "hunter", name: "Chata myśliwego", glyph: "♜", note: unavailable },
-      { id: "apple-orchard", name: "Sad jabłoni", glyph: "♧", note: unavailable },
-      { id: "dairy-farm", name: "Farma mleczna", glyph: "♉", note: unavailable },
-      { id: "wheat-farm", name: "Farma pszenicy", glyph: "✧", note: unavailable },
-      { id: "hop-farm", name: "Farma chmielu", glyph: "❧", note: unavailable }
+      { id: "granary", name: "Spichlerz (Granary)", glyph: "▤", cost: "60 drewna · 10 kamienia", implemented: true, note: "Fizyczny magazyn żywności; rozbudowa przez dostawianie modułów." },
+      { id: "hunter", name: "Chata myśliwego", glyph: "♜", cost: "25 drewna", implemented: true, note: "Wymaga stada zwierzyny w pobliżu. Mięso trafia do Spichlerza." },
+      { id: "apple-orchard", name: "Sad jabłoni", glyph: "♧", cost: "25 drewna", implemented: true, note: "Stawiany na oazie. Jabłka trafiają do Spichlerza." },
+      { id: "dairy-farm", name: "Farma mleczna", glyph: "♉", cost: "40 drewna", implemented: true, note: "Stawiana na oazie. Produkuje ser; krowy dla Garbarza są osobnym zasobem." },
+      { id: "wheat-farm", name: "Farma pszenicy", glyph: "✧", cost: "25 drewna", implemented: true, note: "Stawiana na oazie. Pszenica trafia do Składu." },
+      { id: "hop-farm", name: "Farma chmielu", glyph: "❧", cost: "25 drewna", implemented: true, note: "Stawiana na oazie. Chmiel trafia do Składu." }
     ]
   },
   {
@@ -90,20 +90,20 @@ export const BUILD_CATEGORIES: BuildCategory[] = [
     id: "weapons", name: "Produkcja broni", shortName: "BROŃ", glyph: "⚔",
     description: "Warsztaty produkujące broń i pancerze.",
     items: [
-      { id: "bowyer", name: "Łuczarz", glyph: "⌒", note: unavailable },
-      { id: "poleturner", name: "Drzewcarz", glyph: "†", note: unavailable },
-      { id: "blacksmith", name: "Kowal", glyph: "⚒", note: unavailable },
-      { id: "tanner", name: "Garbarz", glyph: "▤", note: unavailable },
-      { id: "armourer", name: "Płatnerz", glyph: "♢", note: unavailable }
+      { id: "bowyer", name: "Łuczarz", glyph: "⌒", cost: "35 drewna", implemented: true, note: "Zużywa drewno ze Składu; łuki i kusze trafiają do Zbrojowni." },
+      { id: "poleturner", name: "Drzewcarz", glyph: "†", cost: "30 drewna", implemented: true, note: "Zużywa drewno ze Składu; włócznie i piki trafiają do Zbrojowni." },
+      { id: "blacksmith", name: "Kowal", glyph: "⚒", cost: "35 drewna · 10 kamienia", implemented: true, note: "Zużywa żelazo ze Składu; broń trafia do Zbrojowni." },
+      { id: "tanner", name: "Garbarz", glyph: "▤", cost: "35 drewna", implemented: true, note: "Zużywa bydło wytworzone przez farmę mleczną; pancerze trafiają do Zbrojowni." },
+      { id: "armourer", name: "Płatnerz", glyph: "♢", cost: "35 drewna · 10 kamienia", implemented: true, note: "Zużywa żelazo ze Składu; zbroje trafiają do Zbrojowni." }
     ]
   },
   {
     id: "food", name: "Przetwórstwo żywności", shortName: "ŻYWNOŚĆ", glyph: "♨",
     description: "Młyn, piekarnia, browar i gospoda.",
     items: [
-      { id: "mill", name: "Młyn", glyph: "✣", note: unavailable },
-      { id: "bakery", name: "Piekarnia", glyph: "♨", note: unavailable },
-      { id: "brewery", name: "Browar", glyph: "♜", note: unavailable },
+      { id: "mill", name: "Młyn", glyph: "✣", cost: "60 drewna · 15 kamienia", implemented: true, note: "Wymaga pszenicy w Składzie; produkuje mąkę do Składu." },
+      { id: "bakery", name: "Piekarnia", glyph: "♨", cost: "30 drewna", implemented: true, note: "Zużywa mąkę ze Składu; 1 mąka daje 8 chlebów do Spichlerza." },
+      { id: "brewery", name: "Browar", glyph: "♜", cost: "40 drewna", implemented: true, note: "Zużywa chmiel ze Składu; piwo trafia do Składu." },
       { id: "inn", name: "Gospoda (Inn)", glyph: "♧", cost: "20 drewna · 100 złota · 1 karczmarz", implemented: true, note: "Obsługuje do 30 mieszkańców. Bonus wymaga piwa dostarczonego ze Składu (etap 4)." }
     ]
   }

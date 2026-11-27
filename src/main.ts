@@ -1,15 +1,27 @@
 import { Application, Container, Text } from "pixi.js";
 import "./style.css";
 import { addGlyph } from "./engine/glyph";
-import { createWatchtower, createTownBuilding, createWorld, WORLD_SIZE, type GameEntity, type TownBuildingType } from "./engine/world";
 import {
+  createWatchtower, createTownBuilding, createStorageBuilding, createProductionBuilding, createWorld, WORLD_SIZE,
+  type GameEntity, type TownBuildingType, type LogisticsBuildingType
+} from "./engine/world";
+import {
+  addStorageBuilding,
   addWorksite,
+  advanceProduction,
+  pickupProductionInput,
+  completeProductionInputDelivery,
   advanceSimulation,
   assignAvailableWorkers,
   calculateFearFactor,
   CAMPFIRE,
   campfireIdlePosition,
   setWorksiteEnabled,
+  depositStoredResource,
+  spendStoredResource,
+  storeResource,
+  syncResourceCounters,
+  totalResource,
   BLESSING_DURATION_SECONDS,
   VILLAGER_MOVE_SPEED,
   getFearDamageMultiplier,
@@ -24,6 +36,12 @@ import {
   TAX_RULES
 } from "./engine/simulation";
 import { BUILD_CATEGORIES, findBuildCategory, findBuildItem } from "./ui/catalog";
+import {
+  DEFAULT_STORAGE_CAPACITY, HUNTING_NODES, PRODUCTION_RECIPES, RESOURCE_DEFINITIONS, STAGE4_BUILD_COSTS,
+  STORAGE_MODULE_CAPACITY, STORAGE_MODULE_COST, canStoreResource, expandStorage,
+  normalizeLogistics, removeStorage, storageFreeSlots, storageUsedSlots, tradeAtMarket,
+  type ProductionType, type ResourceId, type StorageType
+} from "./engine/logistics";
 import {
   findGridPath,
   GRID_PIVOT,
@@ -50,6 +68,9 @@ type PlacedStructureCost = {
   housing?: number;
   worksiteId?: string;
   fearObjectId?: string;
+  storageId?: string;
+  storageModuleId?: string;
+  storageModuleSlots?: number;
 };
 
 interface GameSave {
@@ -63,6 +84,7 @@ interface GameSave {
   undoStack: string[];
   towerCounter: number;
   townBuildingCounter: number;
+  stage4BuildingCounter: number;
   camera: CameraState;
   cameraBookmarks: [number, CameraState][];
   lastCameraBeforeJump: CameraState | null;
@@ -177,6 +199,7 @@ const cameraBookmarks = new Map<number, CameraState>();
 const placedStructures = new Map<string, PlacedStructureCost>();
 const undoStack: string[] = [];
 let townBuildingCounter = 0;
+let stage4BuildingCounter = 0;
 let minimapRefresh = 0;
 const villagerViews = new Map<string, Text>();
 let campfireRingGreen: Text;
@@ -208,6 +231,12 @@ function selectedUnits(): GameEntity[] {
 
 function canPlaceBuildPreview(itemId: string, point: { x: number; y: number }): boolean {
   if (point.x < 40 || point.y < 40 || point.x > WORLD_SIZE.width - 40 || point.y > WORLD_SIZE.height - 40) return false;
+  if (STAGE4_BUILDING_IDS.includes(itemId)) {
+    const cost = STAGE4_BUILD_COSTS[itemId];
+    const placement = stage4PlacementPoint(itemId, point.x, point.y);
+    return !!cost && !!placement && totalResource(simulation, "wood") >= cost.wood &&
+      totalResource(simulation, "stone") >= cost.stone && simulation.gold >= cost.gold;
+  }
   if (!isBuildableAtWorld(world.grid, point)) return false;
   if (itemId === "watchtower") {
     if (simulation.wood < 70 || simulation.stone < 30) return false;
@@ -324,7 +353,7 @@ function selectBuildItem(itemId: string): void {
     return;
   }
   const stageThreeBuildings = ["hovel", "chapel", "church", "cathedral", "inn", "good-things", "bad-things"];
-  if (itemId === "watchtower" || stageThreeBuildings.includes(itemId)) {
+  if (itemId === "watchtower" || stageThreeBuildings.includes(itemId) || STAGE4_BUILDING_IDS.includes(itemId)) {
     setMode("build");
     setStatus("Budowa: kliknij wolne, dozwolone pole mapy. " + (item.cost ?? ""));
     return;
@@ -424,10 +453,51 @@ function advanceVillagerRoute(villager: (typeof simulation.villagers)[number], g
 
 function updateVillagerVisuals(realDeltaSeconds: number): void {
   const gameDelta = paused ? 0 : realDeltaSeconds * (simulation.speed / 40);
+  if (gameDelta > 0) advanceProduction(simulation, gameDelta);
   const activeIds = new Set(simulation.villagers.map((villager) => villager.id));
   for (const [id, glyph] of villagerViews) {
     if (!activeIds.has(id)) { glyph.destroy(); villagerViews.delete(id); }
   }
+
+  const getWorksite = (villager: (typeof simulation.villagers)[number]) =>
+    simulation.worksites.find((site) => site.id === (villager.returnWorksiteId ?? villager.worksiteId));
+  const getStorage = (storageId: string | undefined) =>
+    simulation.logistics.storages.find((storage) => storage.id === storageId);
+  const sendWorkerBack = (villager: (typeof simulation.villagers)[number]): void => {
+    villager.status = "returning-to-work";
+    villager.moveTarget = undefined;
+    villager.movementQueue = [];
+  };
+  const deliverCargo = (villager: (typeof simulation.villagers)[number]): boolean => {
+    const storage = getStorage(villager.targetStorageId);
+    if (!storage || !villager.cargo?.length) return false;
+    const remaining: NonNullable<typeof villager.cargo> = [];
+    for (const item of villager.cargo) {
+      const stored = storeResource(simulation, storage.id, item.resource, item.amount);
+      if (stored + 0.000001 < item.amount) remaining.push({ resource: item.resource, amount: item.amount - stored });
+    }
+    if (remaining.length) {
+      villager.cargo = remaining;
+      const alternative = simulation.logistics.storages
+        .filter((candidate) => candidate.id !== storage.id && remaining.every((item) => canStoreResource(candidate, item.resource, item.amount)))
+        .sort((a, b) => Math.hypot(a.x - villager.x, a.y - villager.y) - Math.hypot(b.x - villager.x, b.y - villager.y))[0];
+      if (alternative) {
+        villager.targetStorageId = alternative.id;
+        villager.status = "hauling-output";
+        villager.moveTarget = undefined;
+        villager.movementQueue = [];
+      } else {
+        villager.status = "waiting-at-storage";
+      }
+      return false;
+    }
+    villager.cargo = undefined;
+    villager.logisticsTask = undefined;
+    villager.targetStorageId = undefined;
+    sendWorkerBack(villager);
+    setResources();
+    return true;
+  };
 
   let returnedToCampfire = false;
   for (const villager of simulation.villagers) {
@@ -436,17 +506,17 @@ function updateVillagerVisuals(realDeltaSeconds: number): void {
       glyph = addGlyph(world.layers.actors, {
         char: villager.role === "priest" ? "♙" : "♟",
         x: villager.x, y: villager.y, size: 19,
-        color: villager.status === "leaving" ? "#b36b62" : villager.role === "priest" ? "#e9dfbc" : "#8bd18a",
+        color: villager.status === "leaving" ? "#b36b62" : villager.cargo?.length ? "#e4c36e" : villager.role === "priest" ? "#e9dfbc" : "#8bd18a",
         alpha: 0.96, stroke: "#10140f", strokeWidth: 1
       });
       villagerViews.set(villager.id, glyph);
     }
     glyph.text = villager.role === "priest" ? "♙" : "♟";
-    glyph.style.fill = villager.status === "leaving" ? "#b36b62" : villager.role === "priest" ? "#e9dfbc" : "#8bd18a";
+    glyph.style.fill = villager.status === "leaving" ? "#b36b62" : villager.cargo?.length ? "#e4c36e" : villager.role === "priest" ? "#e9dfbc" : "#8bd18a";
+
     if (villager.status === "walking-to-work" && !villager.moveTarget && villager.movementQueue.length === 0) {
       const target = { x: villager.targetX ?? villager.x, y: villager.targetY ?? villager.y };
       if (!routeVillagerTo(villager, target)) {
-        // Do not leave a phantom worker in the site's roster when a path is blocked.
         for (const site of simulation.worksites) {
           const workerIndex = site.workerIds.indexOf(villager.id);
           if (workerIndex >= 0) site.workerIds.splice(workerIndex, 1);
@@ -459,13 +529,38 @@ function updateVillagerVisuals(realDeltaSeconds: number): void {
         syncPopulationCounters(simulation);
       }
     }
+    if (["fetching-input", "hauling-output", "waiting-for-route"].includes(villager.status) &&
+        !villager.moveTarget && villager.movementQueue.length === 0) {
+      const returning = villager.status === "waiting-for-route" && !!villager.returnWorksiteId && !villager.targetStorageId;
+      const destination = returning ? getWorksite(villager) : getStorage(villager.targetStorageId);
+      if (destination) {
+        const routed = routeVillagerTo(villager, destination);
+        if (routed) villager.status = returning ? "returning-to-work" : villager.logisticsTask === "fetch-input" ? "fetching-input" : "hauling-output";
+        else villager.status = "waiting-for-route";
+      } else {
+        villager.status = "waiting-for-route";
+      }
+    }
+    if (villager.status === "waiting-at-storage") {
+      if (villager.logisticsTask === "fetch-input" && !villager.cargo) pickupProductionInput(simulation, villager.id);
+      else deliverCargo(villager);
+    }
+    if (villager.status === "returning-to-work" && !villager.moveTarget && villager.movementQueue.length === 0) {
+      const site = getWorksite(villager);
+      if (site && !routeVillagerTo(villager, site)) {
+        villager.status = "waiting-for-route";
+        site.waitingReason = "Pracownik nie ma drożnej trasy powrotnej";
+      }
+    }
     if (villager.status === "returning-to-campfire" && !villager.moveTarget && villager.movementQueue.length === 0) {
       routeVillagerTo(villager, CAMPFIRE);
     }
     if (villager.status === "leaving" && !villager.moveTarget && villager.movementQueue.length === 0) {
       routeVillagerOut(villager);
     }
-    if (gameDelta > 0 && (villager.status === "walking-to-work" || villager.status === "returning-to-campfire" || villager.status === "leaving")) {
+
+    const movingStatuses = ["walking-to-work", "returning-to-campfire", "leaving", "fetching-input", "hauling-output", "returning-to-work"];
+    if (gameDelta > 0 && movingStatuses.includes(villager.status)) {
       const arrived = advanceVillagerRoute(villager, gameDelta);
       if (arrived && villager.status === "leaving") villager.departed = true;
       if (arrived && villager.status === "returning-to-campfire") {
@@ -480,7 +575,7 @@ function updateVillagerVisuals(realDeltaSeconds: number): void {
         returnedToCampfire = true;
       }
       if (arrived && villager.status === "walking-to-work") {
-        const site = simulation.worksites.find((candidate) => candidate.id === villager.worksiteId);
+        const site = getWorksite(villager);
         if (site) {
           const slot = Math.max(0, site.workerIds.indexOf(villager.id));
           const angle = slot * 2.399963229728653;
@@ -488,6 +583,26 @@ function updateVillagerVisuals(realDeltaSeconds: number): void {
           villager.y = site.y + Math.sin(angle) * 18;
         }
         villager.status = "working";
+      } else if (arrived && villager.status === "fetching-input") {
+        pickupProductionInput(simulation, villager.id);
+      } else if (arrived && villager.status === "hauling-output") {
+        deliverCargo(villager);
+      } else if (arrived && villager.status === "returning-to-work") {
+        const site = getWorksite(villager);
+        if (villager.logisticsTask === "fetch-input") {
+          completeProductionInputDelivery(simulation, villager.id);
+        } else {
+          villager.logisticsTask = undefined;
+          villager.targetStorageId = undefined;
+          villager.returnWorksiteId = undefined;
+          villager.status = "working";
+        }
+        if (site) {
+          const slot = Math.max(0, site.workerIds.indexOf(villager.id));
+          const angle = slot * 2.399963229728653;
+          villager.x = site.x + Math.cos(angle) * 22;
+          villager.y = site.y + Math.sin(angle) * 18;
+        }
       }
     }
     glyph.position.set(villager.x, villager.y);
@@ -523,6 +638,7 @@ function updateVillagerVisuals(realDeltaSeconds: number): void {
   }
 
   syncPopulationCounters(simulation);
+  syncResourceCounters(simulation);
   simulation.fear = calculateFearFactor(simulation.fearObjects, simulation.population);
   updateBlessedShare(simulation);
   const topPopulation = document.querySelector<HTMLElement>("#population-value");
@@ -539,6 +655,10 @@ function updateVillagerVisuals(realDeltaSeconds: number): void {
   campfireGlyph.alpha = simulation.unemployed >= 24 ? 0.55 : 0.96;
   updateScribe();
 }
+
+const variantNamesForMain: Partial<Record<ResourceId, string>> = {
+  bow: "Łuk", crossbow: "Kusza", spear: "Włócznia", pike: "Pika", mace: "Buzdygan", sword: "Miecz"
+};
 
 function renderSelectionPanel(): void {
   const selection = allSelected();
@@ -584,11 +704,49 @@ function renderSelectionPanel(): void {
     const worksite = entity.kind === "building"
       ? simulation.worksites.find((site) => site.id === entity.id)
       : undefined;
+    const storage = entity.kind === "building"
+      ? simulation.logistics.storages.find((candidate) => candidate.id === entity.id)
+      : undefined;
+    const storageRows = storage
+      ? (Object.entries(storage.inventory) as [ResourceId, number][]).filter(([, amount]) => amount > 0)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([resource, amount]) => '<div class="dialog-row"><span>' + RESOURCE_DEFINITIONS[resource].name + '</span><b>' + amount.toLocaleString("pl-PL", { maximumFractionDigits: 2 }) + '</b></div>').join("")
+      : '';
+    const storageMarkup = storage
+      ? '<div class="storage-panel"><div class="selection-meta">MAGAZYN · WYKORZYSTANIE POL <b>' + storageUsedSlots(storage) + '/' + storage.capacitySlots +
+        ' · WOLNE ' + storageFreeSlots(storage) + '</b></div>' + (storageRows || '<p class="dialog-note">Magazyn jest pusty.</p>') +
+        '<button type="button" data-storage-expand="' + storage.id + '"' + (paused ? ' disabled' : '') + '>＋ DOSTAW MODUŁ +' + STORAGE_MODULE_CAPACITY + ' PÓL · ' + STORAGE_MODULE_COST.wood + ' DREWNA / ' + STORAGE_MODULE_COST.stone + ' KAMIENIA</button></div>'
+      : '';
+    const worksiteStatus = worksite?.waitingReason ? ' · ' + worksite.waitingReason : worksite?.productionType ? ' · POSTĘP ' + Math.floor(((worksite.productionProgress ?? 0) / PRODUCTION_RECIPES[worksite.productionType].cycleSeconds) * 100) + '%' : '';
+    const variants: Partial<Record<ProductionType, ResourceId[]>> = {
+      bowyer: ["bow", "crossbow"], poleturner: ["spear", "pike"], blacksmith: ["mace", "sword"]
+    };
+    const availableVariants = worksite?.productionType ? variants[worksite.productionType] : undefined;
+    const variantNames: Partial<Record<ResourceId, string>> = { bow: "Łuk", crossbow: "Kusza", spear: "Włócznia", pike: "Pika", mace: "Buzdygan", sword: "Miecz" };
+    const variantMarkup = availableVariants
+      ? '<div class="selection-meta">PRODUKOWANE UZBROJENIE</div><div class="variant-controls">' + availableVariants.map((variant) =>
+        '<button type="button" data-production-variant="' + variant + '" data-worksite-id="' + worksite!.id + '" class="' + ((worksite!.outputVariant ?? PRODUCTION_RECIPES[worksite!.productionType!].output.resource) === variant ? 'active' : '') + '"' + (paused ? ' disabled' : '') + '>' + variantNames[variant] + '</button>'
+      ).join("") + '</div>'
+      : '';
     const worksiteMarkup = worksite
       ? '<div class="worksite-controls"><div class="selection-meta">PRACOWNICY <b>' + worksite.workerIds.length + '/' + worksite.requiredWorkers +
-        ' · ' + (worksite.enabled === false ? 'WSTRZYMANO' : 'AKTYWNY') + '</b></div><button type="button" data-worksite-toggle="' + worksite.id + '"' +
+        ' · ' + (worksite.enabled === false ? 'WSTRZYMANO' : 'AKTYWNY') + worksiteStatus + '</b></div>' + variantMarkup + '<button type="button" data-worksite-toggle="' + worksite.id + '"' +
         (paused ? ' disabled' : '') + '>' + (worksite.enabled === false ? '▶ WZNÓW PRACĘ' : 'Ⅱ WSTRZYMAJ PRACĘ') + '</button></div>'
       : '';
+    const marketResources: ResourceId[] = ["wood", "stone", "iron", "pitch", "wheat", "flour", "hops", "beer", "apples", "cheese", "meat", "bread", "bow", "crossbow", "spear", "pike", "mace", "sword", "leatherArmor", "plateArmor"];
+    const marketMarkup = entity.id.startsWith("market-")
+      ? '<div class="market-panel"><div class="selection-meta">HANDEL RĘCZNY · CENA ZAKUPU / SPRZEDAŻY</div>' +
+        marketResources.filter((resource) => RESOURCE_DEFINITIONS[resource].buyPrice > 0).map((resource) => {
+          const info = RESOURCE_DEFINITIONS[resource];
+          const owned = totalResource(simulation, resource);
+          return '<div class="market-row"><span>' + info.name + '<small>Masz: ' + owned + ' · ' + info.buyPrice + '/' + info.sellPrice + ' zł</small></span><div>' +
+            '<button type="button" data-market-direction="buy" data-market-resource="' + resource + '" data-market-quantity="1"' + (paused ? ' disabled' : '') + '>+1</button>' +
+            '<button type="button" data-market-direction="buy" data-market-resource="' + resource + '" data-market-quantity="5"' + (paused ? ' disabled' : '') + '>+5</button>' +
+            '<button type="button" data-market-direction="sell" data-market-resource="' + resource + '" data-market-quantity="1"' + (paused ? ' disabled' : '') + '>−1</button>' +
+            '<button type="button" data-market-direction="sell" data-market-resource="' + resource + '" data-market-quantity="5"' + (paused ? ' disabled' : '') + '>−5</button></div></div>';
+        }).join("") + '</div>'
+      : '';
+
     contextContent.innerHTML =
       '<div class="selection-panel single-selection"><div class="selection-topline"><span>' +
       (entity.team === "enemy" ? "WROGI OBIEKT" : entity.kind === "unit" ? "ODDZIAŁ BOJOWY" : "BUDOWLA") +
@@ -597,7 +755,7 @@ function renderSelectionPanel(): void {
       '%;background:' + (entity.team === "enemy" ? "#e45b52" : "#78b8dd") +
       '"></span></div><div class="selection-meta">WYTRZYMAŁOŚĆ <b>' + Math.ceil(health) + '%</b></div>' +
       (entity.kind === "unit" ? '<div class="selection-meta">LICZEBNOŚĆ <b>' + (entity.count ?? 1) + '</b></div>' : '') +
-      worksiteMarkup +
+      storageMarkup + worksiteMarkup + marketMarkup +
       (entity.kind === "unit" && entity.team === "player" ?
         '<div class="stance-controls"><small>POSTAWA BOJOWA · ' + (entity.stance ?? "DOMYŚLNA").toUpperCase() +
         '</small><div><button type="button" data-stance="stand-ground">▣ UTRZYMAĆ POZYCJĘ</button>' +
@@ -620,6 +778,38 @@ function renderSelectionPanel(): void {
   contextContent.querySelectorAll<HTMLButtonElement>("[data-worksite-toggle]").forEach((button) => {
     button.addEventListener("click", () => toggleWorksite(button.dataset.worksiteToggle ?? ""));
   });
+  contextContent.querySelectorAll<HTMLButtonElement>("[data-storage-expand]").forEach((button) => {
+    button.addEventListener("click", () => expandSelectedStorage(button.dataset.storageExpand ?? ""));
+  });
+  contextContent.querySelectorAll<HTMLButtonElement>("[data-production-variant]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (paused) { setStatus("Gra jest wstrzymana — zmiana produkcji jest niedostępna."); return; }
+      const site = simulation.worksites.find((candidate) => candidate.id === button.dataset.worksiteId);
+      const variant = button.dataset.productionVariant as ResourceId | undefined;
+      if (!site || !variant || !["bow", "crossbow", "spear", "pike", "mace", "sword"].includes(variant)) return;
+      if (site.pendingOutput || site.pendingOutputs?.length || simulation.villagers.some((villager) => villager.worksiteId === site.id && villager.cargo?.length)) {
+        setStatus("Zakończ bieżącą dostawę przed zmianą rodzaju produkowanej broni."); return;
+      }
+      site.outputVariant = variant;
+      renderSelectionPanel();
+      setStatus("Zmieniono produkowany towar na: " + (variantNamesForMain[variant] ?? variant) + ".");
+    });
+  });
+  contextContent.querySelectorAll<HTMLButtonElement>("[data-market-direction]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (paused) { setStatus("Gra jest wstrzymana — handel jest niedostępny."); return; }
+      const resource = button.dataset.marketResource as ResourceId | undefined;
+      const direction = button.dataset.marketDirection;
+      const quantity = Number(button.dataset.marketQuantity);
+      if (!resource || (direction !== "buy" && direction !== "sell")) return;
+      const result = tradeAtMarket(simulation.logistics, simulation.gold, resource, quantity, direction);
+      simulation.gold = result.gold;
+      syncResourceCounters(simulation);
+      setResources();
+      renderSelectionPanel();
+      setStatus(result.message);
+    });
+  });
   contextContent.querySelectorAll<HTMLButtonElement>("[data-unit-type]").forEach((button) => {
     button.addEventListener("click", () => {
       const type = button.dataset.unitType ?? "";
@@ -635,12 +825,77 @@ function renderSelectionPanel(): void {
   });
 }
 
+function expandSelectedStorage(storageId: string): void {
+  if (paused) { setStatus("Gra jest wstrzymana — rozbudowa magazynu jest niedostępna."); return; }
+  const storage = simulation.logistics.storages.find((candidate) => candidate.id === storageId);
+  const storageEntity = entities.find((entity) => entity.id === storageId);
+  if (!storage || !storageEntity) return;
+  if (totalResource(simulation, "wood") < STORAGE_MODULE_COST.wood || totalResource(simulation, "stone") < STORAGE_MODULE_COST.stone) {
+    setStatus("Rozbudowa wymaga " + STORAGE_MODULE_COST.wood + " drewna i " + STORAGE_MODULE_COST.stone + " kamienia w Składzie.");
+    return;
+  }
+  const parentTile = worldToCell(world.grid, storage);
+  if (!parentTile) { setStatus("Nie można rozbudować magazynu poza siatką mapy."); return; }
+  const attachedModules = [...placedStructures.entries()]
+    .filter(([, record]) => record.storageModuleId === storageId)
+    .map(([id]) => entities.find((entity) => entity.id === id))
+    .filter((entity): entity is GameEntity => !!entity);
+  const anchors = [storageEntity, ...attachedModules];
+  const candidatePoints: { x: number; y: number; distance: number }[] = [];
+  for (const anchorEntity of anchors) {
+    const anchorTile = worldToCell(world.grid, anchorEntity);
+    if (!anchorTile) continue;
+    for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+      const col = anchorTile.col + dc;
+      const row = anchorTile.row + dr;
+      if (col < 0 || row < 0 || col >= world.grid.columns || row >= world.grid.rows) continue;
+      const tile = world.grid.tiles[row * world.grid.columns + col];
+      if (!tile || !tile.walkable || !tile.buildable) continue;
+      const point = worldPositionForCell(world.grid, tile.col, tile.row);
+      if (!point) continue;
+      if (entities.some((entity) => Math.hypot(entity.x - point.x, entity.y - point.y) < 8)) continue;
+      candidatePoints.push({ ...point, distance: Math.hypot(point.x - anchorEntity.x, point.y - anchorEntity.y) });
+    }
+  }
+  candidatePoints.sort((a, b) => a.distance - b.distance);
+  const point = candidatePoints[0] ? { x: candidatePoints[0].x, y: candidatePoints[0].y } : undefined;
+  if (!point) { setStatus("Brak wolnego pola bezpośrednio obok magazynu. Oczyść teren przed rozbudową."); return; }
+  if (totalResource(simulation, "wood") < STORAGE_MODULE_COST.wood || totalResource(simulation, "stone") < STORAGE_MODULE_COST.stone) {
+    setStatus("Rozbudowa wymaga obu surowców w Składzie.");
+    return;
+  }
+  spendStoredResource(simulation, "wood", STORAGE_MODULE_COST.wood);
+  spendStoredResource(simulation, "stone", STORAGE_MODULE_COST.stone);
+  stage4BuildingCounter += 1;
+  const module = createStorageBuilding(world.layers.structures, storage.type, stage4BuildingCounter, point.x, point.y, true);
+  expandStorage(storage, STORAGE_MODULE_CAPACITY);
+  entities.push(module);
+  placedStructures.set(module.id, { wood: STORAGE_MODULE_COST.wood, stone: STORAGE_MODULE_COST.stone, gold: 0, storageModuleId: storage.id, storageModuleSlots: STORAGE_MODULE_CAPACITY });
+  undoStack.push(module.id);
+  setResources();
+  renderMinimap();
+  updateSelection();
+  setStatus("Dostawiono moduł magazynu. Pojemność " + storage.capacitySlots + " pól.");
+}
+
 function toggleWorksite(worksiteId: string): void {
   if (paused) { setStatus("Gra jest wstrzymana — nie można zmieniać pracy budynku."); return; }
   const site = simulation.worksites.find((candidate) => candidate.id === worksiteId);
   if (!site) return;
+  const linkedOx = site.productionType === "quarry"
+    ? simulation.worksites.find((candidate) => candidate.oxTetherFor === site.id)
+    : undefined;
+  const hasCargo = simulation.villagers.some((villager) =>
+    (villager.worksiteId === worksiteId || villager.worksiteId === linkedOx?.id || villager.returnWorksiteId === worksiteId) && !!villager.cargo?.length
+  );
+  if (site.enabled !== false && hasCargo) { setStatus("Pracownik niesie towar — poczekaj na zakończenie dostawy."); return; }
   const resume = site.enabled === false;
   if (!setWorksiteEnabled(simulation, worksiteId, resume)) return;
+  if (linkedOx) setWorksiteEnabled(simulation, linkedOx.id, resume);
+  if (site.oxTetherFor) {
+    const quarry = simulation.worksites.find((candidate) => candidate.id === site.oxTetherFor);
+    if (quarry) setWorksiteEnabled(simulation, quarry.id, resume);
+  }
   updateVillagerVisuals(0);
   updateSelection();
   setStatus(resume
@@ -950,6 +1205,124 @@ function runSelectionCommand(command: string): void {
 }
 
 
+const STAGE4_STORAGE_TYPES: Record<string, StorageType> = { stockpile: "stockpile", granary: "granary", armory: "armory" };
+const STAGE4_PRODUCTION_TYPES = Object.keys(PRODUCTION_RECIPES) as ProductionType[];
+const STAGE4_BUILDING_IDS = ["stockpile", "granary", "armory", "market", "ox-tether", ...STAGE4_PRODUCTION_TYPES];
+
+function findProductionSource(type: ProductionType, point: { x: number; y: number }): { x: number; y: number } | null {
+  const recipe = PRODUCTION_RECIPES[type];
+  if (recipe.source === "none") return point;
+  if (recipe.source === "deer") {
+    const nearest = [...HUNTING_NODES].sort((a, b) => Math.hypot(a.x - point.x, a.y - point.y) - Math.hypot(b.x - point.x, b.y - point.y))[0];
+    return nearest && Math.hypot(nearest.x - point.x, nearest.y - point.y) <= recipe.sourceRange ? nearest : null;
+  }
+  if (recipe.source === "forest") {
+    const nearest = world.grid.tiles.filter((tile) => tile.terrain === "forest" && tile.walkable)
+      .map((tile) => worldPositionForCell(world.grid, tile.col, tile.row))
+      .filter((candidate): candidate is { x: number; y: number } => !!candidate)
+      .sort((a, b) => Math.hypot(a.x - point.x, a.y - point.y) - Math.hypot(b.x - point.x, b.y - point.y))[0];
+    return nearest && Math.hypot(nearest.x - point.x, nearest.y - point.y) <= recipe.sourceRange ? nearest : null;
+  }
+  const tile = worldToCell(world.grid, point);
+  if (!tile || tile.terrain !== recipe.source) return null;
+  return worldPositionForCell(world.grid, tile.col, tile.row);
+}
+
+function stage4PlacementPoint(itemId: string, x: number, y: number): { point: { x: number; y: number }; source?: { x: number; y: number } } | null {
+  if (x < 40 || y < 40 || x > WORLD_SIZE.width - 40 || y > WORLD_SIZE.height - 40) return null;
+  const tile = worldToCell(world.grid, { x, y });
+  const point = tile ? worldPositionForCell(world.grid, tile.col, tile.row) : null;
+  if (!tile || !point || !tile.walkable) return null;
+  const storageType = STAGE4_STORAGE_TYPES[itemId];
+  if (storageType || itemId === "market" || itemId === "ox-tether") {
+    if (!tile.buildable) return null;
+  } else {
+    const productionType = itemId as ProductionType;
+    if (!(productionType in PRODUCTION_RECIPES)) return null;
+    const source = findProductionSource(productionType, point);
+    if (!source) return null;
+    const sourceKind = PRODUCTION_RECIPES[productionType].source;
+    if (["stone", "iron", "tar"].includes(sourceKind) && tile.terrain !== sourceKind) return null;
+    if (sourceKind === "oasis" && tile.terrain !== "oasis") return null;
+    if (!["stone", "iron", "tar"].includes(sourceKind) && !tile.buildable) return null;
+    if (entities.some((entity) => Math.hypot(entity.x - point.x, entity.y - point.y) < (entity.kind === "building" ? 90 : 48))) return null;
+    return { point, source };
+  }
+  if (itemId === "ox-tether" && !simulation.worksites.some((site) => site.productionType === "quarry" && Math.hypot(site.x - point.x, site.y - point.y) <= 150)) return null;
+  if (entities.some((entity) => Math.hypot(entity.x - point.x, entity.y - point.y) < (entity.kind === "building" ? 100 : 48))) return null;
+  return { point };
+}
+
+function placeStage4Building(itemId: string, x: number, y: number): void {
+  if (paused) { setStatus("Gra jest wstrzymana — budowanie jest niedostępne."); return; }
+  const cost = STAGE4_BUILD_COSTS[itemId];
+  const placement = stage4PlacementPoint(itemId, x, y);
+  if (!cost || !placement) {
+    setStatus("Nieprawidłowe miejsce. Sprawdź wymagany teren, złoże, oazę lub wolne miejsce obok innych budynków.");
+    return;
+  }
+  if (totalResource(simulation, "wood") < cost.wood || totalResource(simulation, "stone") < cost.stone || simulation.gold < cost.gold) {
+    setStatus("Brakuje surowców w Składzie lub złota w skarbcu.");
+    return;
+  }
+  if (cost.wood && !spendStoredResource(simulation, "wood", cost.wood)) return;
+  if (cost.stone && !spendStoredResource(simulation, "stone", cost.stone)) {
+    if (cost.wood) depositStoredResource(simulation, "stockpile", "wood", cost.wood);
+    setResources();
+    return;
+  }
+  simulation.gold -= cost.gold;
+  stage4BuildingCounter += 1;
+  let building: GameEntity;
+  const storageType = STAGE4_STORAGE_TYPES[itemId];
+  const record: PlacedStructureCost = { wood: cost.wood, stone: cost.stone, gold: cost.gold };
+  if (storageType) {
+    building = createStorageBuilding(world.layers.structures, storageType, stage4BuildingCounter, placement.point.x, placement.point.y);
+    if (!addStorageBuilding(simulation, {
+      id: building.id, type: storageType, x: building.x, y: building.y,
+      capacitySlots: DEFAULT_STORAGE_CAPACITY, moduleCount: 0, inventory: {}
+    })) {
+      building.group.destroy({ children: true });
+      setStatus("Nie udało się utworzyć magazynu o tym identyfikatorze.");
+      return;
+    }
+    record.storageId = building.id;
+    entities.push(building);
+  } else {
+    building = createProductionBuilding(world.layers.structures, itemId as LogisticsBuildingType, stage4BuildingCounter, placement.point.x, placement.point.y);
+    entities.push(building);
+    if (itemId === "ox-tether") {
+      const quarry = simulation.worksites
+        .filter((site) => site.productionType === "quarry")
+        .sort((a, b) => Math.hypot(a.x - building.x, a.y - building.y) - Math.hypot(b.x - building.x, b.y - building.y))[0];
+      if (!quarry) { entities.pop(); building.group.destroy({ children: true }); setStatus("Najpierw postaw kamieniołom."); return; }
+      addWorksite(simulation, { id: building.id, kind: "production", requiredWorkers: 1, workerIds: [], x: building.x, y: building.y, oxTetherFor: quarry.id });
+      record.worksiteId = building.id;
+    } else if (itemId !== "market") {
+      const productionType = itemId as ProductionType;
+      const recipe = PRODUCTION_RECIPES[productionType];
+      addWorksite(simulation, {
+        id: building.id, kind: "production", requiredWorkers: recipe.workers, workerIds: [],
+        enabled: true, x: building.x, y: building.y, productionType,
+        productionProgress: 0, inputBuffer: {}, sourceX: placement.source?.x, sourceY: placement.source?.y
+      });
+      record.worksiteId = building.id;
+    }
+  }
+  placedStructures.set(building.id, record);
+  undoStack.push(building.id);
+  syncResourceCounters(simulation);
+  updateVillagerVisuals(0);
+  setResources();
+  replaceSelection([building]);
+  setMode("select");
+  renderMinimap();
+  const note = storageType
+    ? "Utworzono fizyczny magazyn. Pojemność początkowa: " + DEFAULT_STORAGE_CAPACITY + " pól."
+    : itemId === "market" ? "Targowisko jest gotowe do ręcznego handlu." : "Załoga została przydzielona. Produkcja czeka na surowce i wolne miejsce w magazynie.";
+  setStatus(building.name + " wzniesiono. " + note);
+}
+
 function placeWatchtower(x: number, y: number): void {
   if (paused) { setStatus("Gra jest wstrzymana — budowanie jest niedostępne."); return; }
   if (wood < 70 || stone < 30) {
@@ -971,8 +1344,12 @@ function placeWatchtower(x: number, y: number): void {
     return;
   }
 
-  simulation.wood -= 70;
-  simulation.stone -= 30;
+  if (totalResource(simulation, "wood") < 70 || totalResource(simulation, "stone") < 30) {
+    setStatus("Surowce muszą znajdować się fizycznie w Składzie.");
+    return;
+  }
+  spendStoredResource(simulation, "wood", 70);
+  spendStoredResource(simulation, "stone", 30);
   towerCounter += 1;
   const tower = createWatchtower(world.layers.structures, buildPoint.x, buildPoint.y, towerCounter);
   entities.push(tower);
@@ -1016,7 +1393,12 @@ function placeTownBuilding(itemId: string, x: number, y: number): void {
   townBuildingCounter += 1;
   const building = createTownBuilding(world.layers.structures, type, townBuildingCounter, point.x, point.y);
   entities.push(building);
-  simulation.wood -= cost.wood;
+  if (cost.wood && !spendStoredResource(simulation, "wood", cost.wood)) {
+    building.group.destroy({ children: true });
+    entities.splice(entities.indexOf(building), 1);
+    setStatus("Drewno musi znajdować się fizycznie w Składzie.");
+    return;
+  }
   simulation.gold -= cost.gold;
 
   const record: PlacedStructureCost = { wood: cost.wood, stone: 0, gold: cost.gold };
@@ -1060,14 +1442,62 @@ function removePlacedStructure(entity: GameEntity, refundRatio: number): boolean
   if (!cost) return false;
   const index = entities.findIndex((candidate) => candidate.id === entity.id);
   if (index < 0) return false;
+  const storage = cost.storageId
+    ? simulation.logistics.storages.find((candidate) => candidate.id === cost.storageId)
+    : undefined;
+  if (storage && (Object.values(storage.inventory).some((amount) => (amount ?? 0) > 0) ||
+      simulation.villagers.some((villager) => villager.targetStorageId === storage.id && !!villager.cargo?.length))) {
+    setStatus("Nie można zburzyć magazynu, który zawiera towary lub jest celem aktywnej dostawy.");
+    return false;
+  }
+  if (cost.storageModuleId) {
+    const parentStorage = simulation.logistics.storages.find((candidate) => candidate.id === cost.storageModuleId);
+    const slots = cost.storageModuleSlots ?? STORAGE_MODULE_CAPACITY;
+    if (!parentStorage || storageUsedSlots(parentStorage) > parentStorage.capacitySlots - slots) {
+      setStatus("Nie można zdjąć modułu: towary zajmują jeszcze jego pola. Najpierw opróżnij magazyn.");
+      return false;
+    }
+  }
+  const worksite = cost.worksiteId ? simulation.worksites.find((site) => site.id === cost.worksiteId) : undefined;
+  if (worksite && (worksite.pendingOutput || worksite.pendingOutputs?.length || simulation.villagers.some((villager) =>
+    (villager.worksiteId === worksite.id || villager.returnWorksiteId === worksite.id) && !!villager.cargo?.length
+  ))) {
+    setStatus("Pracownik lub budynek ma niedostarczony towar. Poczekaj na zakończenie transportu.");
+    return false;
+  }
+  if (worksite?.productionType === "quarry" && simulation.worksites.some((site) => site.oxTetherFor === worksite.id)) {
+    setStatus("Najpierw usuń przypisane uwiązy wołów.");
+    return false;
+  }
+  const refundWood = Math.floor(cost.wood * refundRatio);
+  const refundStone = Math.floor(cost.stone * refundRatio);
+  const refundTargets: { resource: ResourceId; amount: number; storageId: string }[] = [];
+  for (const [resource, amount] of [["wood", refundWood], ["stone", refundStone]] as [ResourceId, number][]) {
+    if (amount <= 0) continue;
+    const destination = simulation.logistics.storages.find((candidate) =>
+      candidate.type === RESOURCE_DEFINITIONS[resource].storage && candidate.id !== cost.storageId && canStoreResource(candidate, resource, amount)
+    );
+    if (!destination) {
+      setStatus("Brak wolnego miejsca w magazynie na zwrot kosztów. Opróżnij lub rozbuduj magazyn.");
+      return false;
+    }
+    refundTargets.push({ resource, amount, storageId: destination.id });
+  }
+  for (const refund of refundTargets) depositStoredResource(simulation, refund.storageId, refund.resource, refund.amount);
   entities.splice(index, 1);
   selectedIds.delete(entity.id);
   entity.group.destroy({ children: true });
-  simulation.wood += Math.floor(cost.wood * refundRatio);
-  simulation.stone += Math.floor(cost.stone * refundRatio);
   simulation.gold += Math.floor(cost.gold * refundRatio);
   if (cost.housing) setHovelCapacity(simulation, -1);
   if (cost.worksiteId) removeWorksite(simulation, cost.worksiteId);
+  if (cost.storageId) removeStorage(simulation.logistics, cost.storageId);
+  if (cost.storageModuleId) {
+    const parentStorage = simulation.logistics.storages.find((candidate) => candidate.id === cost.storageModuleId);
+    if (parentStorage) {
+      parentStorage.capacitySlots -= cost.storageModuleSlots ?? STORAGE_MODULE_CAPACITY;
+      parentStorage.moduleCount = Math.max(0, parentStorage.moduleCount - 1);
+    }
+  }
   if (cost.fearObjectId) {
     simulation.fearObjects = simulation.fearObjects.filter((object) => object.id !== cost.fearObjectId);
     simulation.fear = calculateFearFactor(simulation.fearObjects, simulation.population);
@@ -1076,6 +1506,7 @@ function removePlacedStructure(entity: GameEntity, refundRatio: number): boolean
   const stackIndex = undoStack.lastIndexOf(entity.id);
   if (stackIndex >= 0) undoStack.splice(stackIndex, 1);
   syncPopulationCounters(simulation);
+  syncResourceCounters(simulation);
   updateVillagerVisuals(0);
   setResources();
   updateSelection();
@@ -1088,11 +1519,12 @@ function undoLastBuild(): void {
   const id = undoStack[undoStack.length - 1];
   if (!id) { setStatus("Nie ma budowy do cofnięcia."); return; }
   const entity = entities.find((candidate) => candidate.id === id);
-  if (!entity || !removePlacedStructure(entity, 1)) {
+  if (!entity) {
     undoStack.pop();
     setStatus("Ostatnia budowla nie istnieje — nie można jej cofnąć.");
     return;
   }
+  if (!removePlacedStructure(entity, 1)) return;
   setMode("select");
   setStatus("Cofnięto ostatnią budowę. Zwrócono 100% kosztów.");
 }
@@ -1121,6 +1553,7 @@ function handleLeftClick(clientX: number, clientY: number, additive: boolean, to
 
   if (mode === "build") {
     if (selectedBuildItemId === "watchtower") placeWatchtower(point.x, point.y);
+    else if (STAGE4_BUILDING_IDS.includes(selectedBuildItemId ?? "")) placeStage4Building(selectedBuildItemId ?? "", point.x, point.y);
     else placeTownBuilding(selectedBuildItemId ?? "", point.x, point.y);
     return;
   }
@@ -1433,6 +1866,18 @@ function renderReports(): void {
   const armyRows = [...armyByType.entries()].map(([type, count]) =>
     '<div class="dialog-row"><span>' + type + '</span><b>' + count + '</b></div>'
   ).join("") || '<p class="dialog-note">Brak jednostek w armii.</p>';
+  const storageRows = simulation.logistics.storages.map((storage) => {
+    const contents = (Object.entries(storage.inventory) as [ResourceId, number][])
+      .filter(([, amount]) => amount > 0)
+      .map(([resource, amount]) => RESOURCE_DEFINITIONS[resource].name + " " + amount.toLocaleString("pl-PL", { maximumFractionDigits: 2 }))
+      .join(" · ") || "pusty";
+    return '<div class="dialog-row"><span>' + storage.id + ' · ' + storage.type + '</span><b>' + storageUsedSlots(storage) + '/' + storage.capacitySlots + ' pól · ' + contents + '</b></div>';
+  }).join("");
+  const productionRows = simulation.worksites.filter((site) => site.productionType).map((site) => {
+    const recipe = PRODUCTION_RECIPES[site.productionType!];
+    const status = site.enabled === false ? "wstrzymano" : site.waitingReason ?? Math.floor(((site.productionProgress ?? 0) / recipe.cycleSeconds) * 100) + "% cyklu";
+    return '<div class="dialog-row"><span>' + recipe.name + ' · ' + site.workerIds.length + '/' + recipe.workers + ' prac.</span><b>' + status + '</b></div>';
+  }).join("") || '<p class="dialog-note">Brak uruchomionych łańcuchów produkcji.</p>';
   const formatModifier = (value: number): string => (value > 0 ? "+" : "") + value;
   const rows = [
     ["Racje żywnościowe", modifiers.ration],
@@ -1466,8 +1911,10 @@ function renderReports(): void {
     '<div class="dialog-row"><span>Poziom strachu</span><b>' + formatModifier(simulation.fear) + '/5</b></div>' +
     '<div class="dialog-row"><span>Wydajność pracy</span><b>' + Math.round(getFearWorkMultiplier(simulation.fear) * 100) + '%</b></div>' +
     '<div class="dialog-row"><span>Mnożnik obrażeń własnego wojska</span><b>' + Math.round(getFearDamageMultiplier(simulation.fear) * 100) + '%</b></div>' +
+    '<h3>Magazyny i towary · fizyczne pola</h3>' + storageRows +
+    '<h3>Produkcja i logistyka</h3>' + productionRows +
     '<h3>Stan armii · według typów</h3>' + armyRows +
-    '<p class="dialog-note">Przyrost ludności zatrzymuje się przy popularności poniżej 50, braku miejsca albo 24 bezrobotnych przy ognisku. Żołnierze nie zajmują miejsc mieszkalnych i nie zużywają racji. Koszt łapówek pozostaje nieaktywny, dopóki nie zostanie skonfigurowany.</p>');
+    '<p class="dialog-note">Towary zajmują ograniczone pola magazynów. Pracownicy przewożą je pieszo; produkcja czeka, gdy brakuje wejścia lub wolnego pola w magazynie docelowym. Przyrost ludności zatrzymuje się przy popularności poniżej 50, braku miejsca albo 24 bezrobotnych przy ognisku. Żołnierze nie zajmują miejsc mieszkalnych i nie zużywają racji. Koszt łapówek pozostaje nieaktywny, dopóki nie zostanie skonfigurowany.</p>');
 }
 
 function openRanking(): void {
@@ -1784,6 +2231,7 @@ function safeSavedPoint(value: unknown): { x: number; y: number } | undefined {
 
 function saveGame(): void {
   try {
+    syncResourceCounters(simulation);
     const savedEntities: SavedEntity[] = entities.map((entity) => {
       const { group: _group, ...saved } = entity;
       return saved;
@@ -1799,6 +2247,7 @@ function saveGame(): void {
       undoStack: [...undoStack],
       towerCounter,
       townBuildingCounter,
+      stage4BuildingCounter,
       camera: captureCamera(),
       cameraBookmarks: [...cameraBookmarks.entries()].map(([number, bookmark]) => [number, { ...bookmark }]),
       lastCameraBeforeJump: lastCameraBeforeJump ? { ...lastCameraBeforeJump } : null,
@@ -1835,6 +2284,16 @@ function loadGame(): void {
   }
 
   const savedSimulation = parsed.simulation;
+  const defaultSimulation = createSimulation();
+  const defaults = defaultSimulation as unknown as Record<string, unknown>;
+  for (const field of [
+    "month", "speed", "monthProgress", "gold", "food", "wood", "stone", "popularity",
+    "population", "housing", "unemployed", "ration", "tax", "bribeCostPerVillager", "foodTypes",
+    "taverns", "beerBarrels", "churches", "cathedrals", "blessedShare", "fear",
+    "spawnProgress", "elapsedSeconds", "nextVillagerId"
+  ]) {
+    if (savedSimulation[field] === undefined) savedSimulation[field] = defaults[field];
+  }
   const numericFields = [
     "month", "speed", "monthProgress", "gold", "food", "wood", "stone", "popularity",
     "population", "housing", "unemployed", "foodTypes", "taverns", "beerBarrels",
@@ -1856,15 +2315,40 @@ function loadGame(): void {
     return;
   }
 
-  const allowedBaseIds = new Set(["keep", "barracks", "mill", "storehouse", "guard", "archers", "riders", "raiders"]);
+  const legacyCivilianSave = !Array.isArray(savedSimulation.villagers);
+  const legacyLogistics = createSimulation().logistics;
+  if (!savedSimulation.logistics || typeof savedSimulation.logistics !== "object") {
+    const stockpile = legacyLogistics.storages.find((storage) => storage.id === "stockpile")!;
+    const granary = legacyLogistics.storages.find((storage) => storage.id === "storehouse")!;
+    stockpile.inventory = {};
+    granary.inventory = {};
+    if (Number(savedSimulation.wood) > 0) stockpile.inventory.wood = Number(savedSimulation.wood);
+    if (Number(savedSimulation.stone) > 0) stockpile.inventory.stone = Number(savedSimulation.stone);
+    if (Number(savedSimulation.beerBarrels) > 0) stockpile.inventory.beer = Number(savedSimulation.beerBarrels);
+    if (Number(savedSimulation.food) > 0) granary.inventory.apples = Number(savedSimulation.food);
+  }
+  let restoredLogistics;
+  try {
+    restoredLogistics = normalizeLogistics(savedSimulation.logistics, legacyLogistics);
+  } catch {
+    closeDialog(); setStatus("Zapis zawiera magazyn z przekroczoną pojemnością lub nieprawidłowym towarem.");
+    return;
+  }
+
+  const allowedBaseIds = new Set(["keep", "barracks", "mill", "storehouse", "stockpile", "guard", "archers", "riders", "raiders"]);
   const savedRecords = parsed.entities.filter((entry): entry is Record<string, unknown> =>
     isRecord(entry) && typeof entry.id === "string" &&
     (allowedBaseIds.has(entry.id) || /^watchtower-\d+$/.test(entry.id) || /^hovel-\d+$/.test(entry.id) ||
-      /^(chapel|church|cathedral|inn)-\d+$/.test(entry.id) || /^fear-(good|bad)-\d+$/.test(entry.id)) &&
+      /^(chapel|church|cathedral|inn)-\d+$/.test(entry.id) || /^fear-(good|bad)-\d+$/.test(entry.id) ||
+      /^(stockpile|granary|armory)-\d+$/.test(entry.id) || /^(stockpile|granary|armory)-module-\d+$/.test(entry.id) ||
+      /^(woodcutter|quarry|iron-mine|pitch-worker|apple-orchard|hunter|dairy-farm|wheat-farm|mill|bakery|hop-farm|brewery|bowyer|poleturner|blacksmith|tanner|armourer|ox-tether|market)-\d+$/.test(entry.id)) &&
     typeof entry.x === "number" && Number.isFinite(entry.x) &&
     typeof entry.y === "number" && Number.isFinite(entry.y) &&
     typeof entry.health === "number" && Number.isFinite(entry.health)
   );
+  if (!savedRecords.some((entry) => entry.id === "stockpile")) {
+    savedRecords.push({ id: "stockpile", x: 715, y: 1080, health: 100 });
+  }
   if (savedRecords.length === 0 || savedRecords.length > 200) {
     closeDialog(); setStatus("Zapis nie zawiera prawidłowych obiektów rozgrywki.");
     return;
@@ -1874,16 +2358,28 @@ function loadGame(): void {
     if (savedSimulation.villagers.length > 200 || !savedSimulation.villagers.every((entry) =>
       isRecord(entry) && typeof entry.id === "string" && typeof entry.x === "number" && Number.isFinite(entry.x) &&
       typeof entry.y === "number" && Number.isFinite(entry.y) &&
-      ["idle", "walking-to-work", "working", "returning-to-campfire", "leaving"].includes(String(entry.status)) &&
+      ["idle", "walking-to-work", "working", "returning-to-campfire", "leaving", "fetching-input", "hauling-output", "returning-to-work", "waiting-at-storage", "waiting-for-route"].includes(String(entry.status)) &&
       ["laborer", "priest"].includes(String(entry.role)) && typeof entry.blessedUntil === "number" &&
-      Array.isArray(entry.movementQueue))) {
+      Array.isArray(entry.movementQueue) &&
+      (entry.cargo === undefined || (Array.isArray(entry.cargo) && entry.cargo.every((item) =>
+        isRecord(item) && typeof item.resource === "string" && item.resource in RESOURCE_DEFINITIONS &&
+        typeof item.amount === "number" && Number.isFinite(item.amount) && item.amount >= 0))) &&
+      (entry.targetStorageId === undefined || typeof entry.targetStorageId === "string") &&
+      (entry.returnWorksiteId === undefined || typeof entry.returnWorksiteId === "string"))) {
       closeDialog(); setStatus("Zapis zawiera nieprawidłową listę mieszkańców."); return;
     }
   }
   if (Array.isArray(savedSimulation.worksites) && !savedSimulation.worksites.every((entry) =>
-    isRecord(entry) && typeof entry.id === "string" && typeof entry.x === "number" && typeof entry.y === "number" &&
-    typeof entry.requiredWorkers === "number" && Array.isArray(entry.workerIds) &&
-    (entry.enabled === undefined || typeof entry.enabled === "boolean"))) {
+    isRecord(entry) && typeof entry.id === "string" && typeof entry.x === "number" && Number.isFinite(entry.x) &&
+    typeof entry.y === "number" && Number.isFinite(entry.y) && Number.isFinite(entry.requiredWorkers) &&
+    Array.isArray(entry.workerIds) && entry.workerIds.every((id) => typeof id === "string") &&
+    (entry.enabled === undefined || typeof entry.enabled === "boolean") &&
+    (entry.productionType === undefined || (typeof entry.productionType === "string" && entry.productionType in PRODUCTION_RECIPES)) &&
+    (entry.outputVariant === undefined || (typeof entry.outputVariant === "string" && entry.outputVariant in RESOURCE_DEFINITIONS)) &&
+    (entry.productionProgress === undefined || (typeof entry.productionProgress === "number" && Number.isFinite(entry.productionProgress) && entry.productionProgress >= 0)) &&
+    (entry.inputBuffer === undefined || (isRecord(entry.inputBuffer) && Object.entries(entry.inputBuffer).every(([resource, amount]) => resource in RESOURCE_DEFINITIONS && typeof amount === "number" && Number.isFinite(amount) && amount >= 0))) &&
+    (entry.pendingOutputs === undefined || (Array.isArray(entry.pendingOutputs) && entry.pendingOutputs.every((item) => isRecord(item) && typeof item.resource === "string" && item.resource in RESOURCE_DEFINITIONS && typeof item.amount === "number" && Number.isFinite(item.amount) && item.amount >= 0))) &&
+    (entry.oxTetherFor === undefined || typeof entry.oxTetherFor === "string"))) {
     closeDialog(); setStatus("Zapis zawiera nieprawidłowe miejsca pracy."); return;
   }
   if (Array.isArray(savedSimulation.fearObjects) && !savedSimulation.fearObjects.every((entry) =>
@@ -1916,6 +2412,7 @@ function loadGame(): void {
   cameraBookmarks.clear();
   towerCounter = 0;
   townBuildingCounter = 0;
+  stage4BuildingCounter = 0;
 
   const baseById = new Map(freshWorld.entities.map((entity) => [entity.id, entity]));
   const restoredEntities: GameEntity[] = [];
@@ -1935,6 +2432,18 @@ function loadGame(): void {
         const type: TownBuildingType = prefix === "fear-good" ? "good" : prefix === "fear-bad" ? "bad" : prefix as TownBuildingType;
         entity = createTownBuilding(freshWorld.layers.structures, type, suffix, Number(record.x), Number(record.y));
         townBuildingCounter = Math.max(townBuildingCounter, suffix);
+      }
+    }
+    if (!entity) {
+      const moduleMatch = id.match(/^(stockpile|granary|armory)-module-(\d+)$/);
+      const storageMatch = id.match(/^(stockpile|granary|armory)-(\d+)$/);
+      const logisticsMatch = id.match(/^(woodcutter|quarry|iron-mine|pitch-worker|apple-orchard|hunter|dairy-farm|wheat-farm|hop-farm|mill|bakery|brewery|bowyer|poleturner|blacksmith|tanner|armourer|ox-tether|market)-(\d+)$/);
+      if (moduleMatch) entity = createStorageBuilding(freshWorld.layers.structures, moduleMatch[1] as StorageType, Number(moduleMatch[2]), Number(record.x), Number(record.y), true);
+      else if (storageMatch) entity = createStorageBuilding(freshWorld.layers.structures, storageMatch[1] as StorageType, Number(storageMatch[2]), Number(record.x), Number(record.y));
+      else if (logisticsMatch) entity = createProductionBuilding(freshWorld.layers.structures, logisticsMatch[1] as LogisticsBuildingType, Number(logisticsMatch[2]), Number(record.x), Number(record.y));
+      if (logisticsMatch || storageMatch || moduleMatch) {
+        const suffix = Number((moduleMatch ?? storageMatch ?? logisticsMatch)?.[2] ?? 0);
+        stage4BuildingCounter = Math.max(stage4BuildingCounter, suffix);
       }
     }
     if (!entity) continue;
@@ -1962,8 +2471,8 @@ function loadGame(): void {
   }
   entities.splice(0, entities.length, ...restoredEntities);
 
-  const legacyCivilianSave = !Array.isArray(savedSimulation.villagers);
   Object.assign(simulation, savedSimulation);
+  simulation.logistics = restoredLogistics;
   if (legacyCivilianSave) {
     const defaults = createSimulation();
     simulation.villagers = defaults.villagers;
@@ -1975,17 +2484,26 @@ function loadGame(): void {
     syncPopulationCounters(simulation);
   }
   if (!Array.isArray(simulation.worksites)) simulation.worksites = [];
+  const legacyMill = simulation.worksites.find((site) => site.id === "mill");
+  if (legacyMill && !legacyMill.productionType) {
+    legacyMill.productionType = "mill";
+    legacyMill.productionProgress = 0;
+    legacyMill.inputBuffer = {};
+  }
   if (!Array.isArray(simulation.fearObjects)) simulation.fearObjects = [];
   if (!Array.isArray(simulation.villagers)) simulation.villagers = createSimulation().villagers;
   if (legacyCivilianSave) assignAvailableWorkers(simulation);
   syncPopulationCounters(simulation);
+  syncResourceCounters(simulation);
   towerCounter = Math.max(towerCounter, typeof parsed.towerCounter === "number" ? parsed.towerCounter : 0);
   townBuildingCounter = Math.max(townBuildingCounter, typeof parsed.townBuildingCounter === "number" ? parsed.townBuildingCounter : 0);
+  stage4BuildingCounter = Math.max(stage4BuildingCounter, typeof parsed.stage4BuildingCounter === "number" ? parsed.stage4BuildingCounter : 0);
 
   if (Array.isArray(parsed.placedStructures)) {
     for (const entry of parsed.placedStructures) {
       if (!Array.isArray(entry) || typeof entry[0] !== "string" || !restoredIds.has(entry[0]) || !isRecord(entry[1])) continue;
-      const { wood: savedWood, stone: savedStone, gold: savedGold, housing: savedHousing, worksiteId, fearObjectId } = entry[1];
+      const { wood: savedWood, stone: savedStone, gold: savedGold, housing: savedHousing, worksiteId, fearObjectId,
+        storageId, storageModuleId, storageModuleSlots } = entry[1];
       if (typeof savedWood === "number" && Number.isFinite(savedWood) &&
           typeof savedStone === "number" && Number.isFinite(savedStone)) {
         placedStructures.set(entry[0], {
@@ -1993,7 +2511,10 @@ function loadGame(): void {
           gold: typeof savedGold === "number" && Number.isFinite(savedGold) ? Math.max(0, savedGold) : 0,
           ...(typeof savedHousing === "number" ? { housing: savedHousing } : {}),
           ...(typeof worksiteId === "string" ? { worksiteId } : {}),
-          ...(typeof fearObjectId === "string" ? { fearObjectId } : {})
+          ...(typeof fearObjectId === "string" ? { fearObjectId } : {}),
+          ...(typeof storageId === "string" ? { storageId } : {}),
+          ...(typeof storageModuleId === "string" ? { storageModuleId } : {}),
+          ...(typeof storageModuleSlots === "number" && Number.isFinite(storageModuleSlots) ? { storageModuleSlots } : {})
         });
       }
     }

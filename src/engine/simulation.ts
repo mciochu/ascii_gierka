@@ -1,10 +1,17 @@
 /** Deterministic economy, civilian population, religion and fear systems for DOMINIUM. */
+import {
+  addStorage, canStoreResource, consumeFood, createInitialLogistics, depositResource,
+  findStorageWithResource, getFoodTotal, getFoodTypes, getResourceTotal,
+  PRODUCTION_RECIPES, RESOURCE_DEFINITIONS, withdrawResource,
+  type LogisticsState, type ResourceId, type StorageBuilding, type ProductionType
+} from "./logistics.ts";
 export type RationLevel = 0 | 0.5 | 1 | 1.5 | 2;
 export type TaxLevel = "bribe-generous" | "bribe-large" | "bribe-small" | "none" | "low" | "medium" | "high" | "heavy" | "extortionate" | "cruel";
 export type WorksiteKind = "production" | "religion" | "inn";
 export type ReligiousBuilding = "chapel" | "church" | "cathedral";
 export type FearObjectKind = "good" | "bad";
-export type VillagerStatus = "idle" | "walking-to-work" | "working" | "returning-to-campfire" | "leaving";
+export type VillagerStatus = "idle" | "walking-to-work" | "working" | "returning-to-campfire" | "leaving" |
+  "fetching-input" | "hauling-output" | "returning-to-work" | "waiting-at-storage" | "waiting-for-route";
 export type VillagerRole = "laborer" | "priest";
 
 export interface Villager {
@@ -23,6 +30,10 @@ export interface Villager {
   departed?: boolean;
   blessingTargetId?: string;
   blessingReadyAt?: number;
+  cargo?: { resource: ResourceId; amount: number }[];
+  logisticsTask?: "fetch-input" | "deliver-output";
+  targetStorageId?: string;
+  returnWorksiteId?: string;
 }
 
 export interface Worksite {
@@ -35,6 +46,17 @@ export interface Worksite {
   x: number;
   y: number;
   buildingType?: ReligiousBuilding;
+  productionType?: ProductionType;
+  productionProgress?: number;
+  inputBuffer?: Partial<Record<ResourceId, number>>;
+  pendingOutput?: { resource: ResourceId; amount: number };
+  pendingOutputs?: { resource: ResourceId; amount: number }[];
+  productionCycles?: number;
+  outputVariant?: ResourceId;
+  waitingReason?: string;
+  sourceX?: number;
+  sourceY?: number;
+  oxTetherFor?: string;
 }
 
 export interface FearObject {
@@ -74,6 +96,7 @@ export interface SimulationState {
   spawnProgress: number;
   elapsedSeconds: number;
   nextVillagerId: number;
+  logistics: LogisticsState;
 }
 
 export const MONTH_LENGTH_SECONDS = 30;
@@ -204,10 +227,200 @@ export function createSimulation(): SimulationState {
     fearObjects: [],
     spawnProgress: 0,
     elapsedSeconds: 0,
-    nextVillagerId: 9
+    nextVillagerId: 9,
+    logistics: createInitialLogistics()
   };
+  state.worksites[0]!.productionType = "mill";
+  state.worksites[0]!.productionProgress = 0;
+  syncResourceCounters(state);
   assignAvailableWorkers(state);
   return state;
+}
+
+/** Legacy HUD totals are derived from the contents of physical warehouses. */
+export function syncResourceCounters(state: SimulationState): void {
+  state.food = getFoodTotal(state.logistics);
+  state.foodTypes = getFoodTypes(state.logistics);
+  state.wood = getResourceTotal(state.logistics, "wood");
+  state.stone = getResourceTotal(state.logistics, "stone");
+  state.beerBarrels = getResourceTotal(state.logistics, "beer");
+}
+
+export function totalResource(state: SimulationState, resource: ResourceId): number {
+  return getResourceTotal(state.logistics, resource);
+}
+
+export function addStorageBuilding(state: SimulationState, storage: StorageBuilding): boolean {
+  return addStorage(state.logistics, storage);
+}
+
+export function depositStoredResource(state: SimulationState, storageId: string, resource: ResourceId, amount: number): number {
+  const storage = state.logistics.storages.find((candidate) => candidate.id === storageId);
+  if (!storage) return 0;
+  const accepted = depositResource(storage, resource, amount);
+  syncResourceCounters(state);
+  return accepted;
+}
+
+export function withdrawStoredResource(state: SimulationState, storageId: string, resource: ResourceId, amount: number): number {
+  const storage = state.logistics.storages.find((candidate) => candidate.id === storageId);
+  if (!storage) return 0;
+  const taken = withdrawResource(storage, resource, amount);
+  syncResourceCounters(state);
+  return taken;
+}
+
+export function spendStoredResource(state: SimulationState, resource: ResourceId, amount: number): boolean {
+  if (!Number.isFinite(amount) || amount < 0 || totalResource(state, resource) + 0.000001 < amount) return false;
+  let remaining = amount;
+  for (const storage of state.logistics.storages.filter((candidate) => candidate.type === RESOURCE_DEFINITIONS[resource].storage)) {
+    remaining -= withdrawResource(storage, resource, remaining);
+    if (remaining <= 0.000001) break;
+  }
+  syncResourceCounters(state);
+  return remaining <= 0.000001;
+}
+
+export function consumeStoredFood(state: SimulationState, amount: number): number {
+  const consumed = consumeFood(state.logistics, amount);
+  syncResourceCounters(state);
+  return consumed;
+}
+
+export function storeResource(state: SimulationState, storageId: string, resource: ResourceId, amount: number): number {
+  return depositStoredResource(state, storageId, resource, amount);
+}
+
+/** Called when a worker physically reaches the storage selected for an input delivery. */
+export function pickupProductionInput(state: SimulationState, villagerId: string): boolean {
+  const villager = state.villagers.find((candidate) => candidate.id === villagerId);
+  if (!villager || villager.status !== "fetching-input" || villager.logisticsTask !== "fetch-input" || villager.cargo?.length) return false;
+  const site = state.worksites.find((candidate) => candidate.id === villager.returnWorksiteId);
+  const recipe = site?.productionType ? PRODUCTION_RECIPES[site.productionType] : undefined;
+  const input = recipe?.input;
+  const source = state.logistics.storages.find((storage) => storage.id === villager.targetStorageId);
+  if (!site || !input || !source || source.type !== RESOURCE_DEFINITIONS[input.resource].storage) return false;
+  const taken = withdrawResource(source, input.resource, input.amount);
+  if (taken < input.amount) {
+    if (taken > 0) depositResource(source, input.resource, taken);
+    site.waitingReason = "Brak surowca wejściowego: " + RESOURCE_DEFINITIONS[input.resource].name;
+    villager.status = "working";
+    villager.logisticsTask = undefined;
+    villager.targetStorageId = undefined;
+    villager.returnWorksiteId = undefined;
+    syncResourceCounters(state);
+    return false;
+  }
+  villager.cargo = [{ resource: input.resource, amount: taken }];
+  villager.targetStorageId = undefined;
+  villager.status = "returning-to-work";
+  site.waitingReason = undefined;
+  syncResourceCounters(state);
+  return true;
+}
+
+/** Called when a courier carrying recipe input physically returns to its worksite. */
+export function completeProductionInputDelivery(state: SimulationState, villagerId: string): boolean {
+  const villager = state.villagers.find((candidate) => candidate.id === villagerId);
+  if (!villager || villager.status !== "returning-to-work" || villager.logisticsTask !== "fetch-input" || !villager.cargo?.length) return false;
+  const site = state.worksites.find((candidate) => candidate.id === villager.returnWorksiteId);
+  if (!site) return false;
+  site.inputBuffer ??= {};
+  for (const item of villager.cargo) site.inputBuffer[item.resource] = (site.inputBuffer[item.resource] ?? 0) + item.amount;
+  villager.cargo = undefined;
+  villager.logisticsTask = undefined;
+  villager.targetStorageId = undefined;
+  villager.returnWorksiteId = undefined;
+  villager.status = "working";
+  return true;
+}
+
+/** Progresses only while all required workers are at their building and physical stock exists. */
+export function advanceProduction(state: SimulationState, deltaSeconds: number): void {
+  const delta = Math.max(0, deltaSeconds);
+  if (delta <= 0) return;
+  for (const site of state.worksites) {
+    if (!site.productionType || site.enabled === false) continue;
+    const recipe = PRODUCTION_RECIPES[site.productionType];
+    const workers = site.workerIds.map((id) => state.villagers.find((villager) => villager.id === id)).filter((v): v is Villager => !!v);
+    if (workers.length < recipe.workers || workers.some((worker) => worker.status !== "working")) continue;
+    const oxCarrier = recipe.requiresOx
+      ? state.worksites.filter((candidate) => candidate.oxTetherFor === site.id && candidate.enabled !== false)
+        .flatMap((oxSite) => oxSite.workerIds.map((id) => state.villagers.find((villager) => villager.id === id)))
+        .find((villager): villager is Villager => !!villager && villager.status === "working")
+      : undefined;
+    if (recipe.requiresOx && !oxCarrier) {
+      site.waitingReason = "Brak czynnego wołu przypisanego do kamieniołomu";
+      continue;
+    }
+    const carrier = oxCarrier ?? workers[0]!;
+    const pending = site.pendingOutputs ?? (site.pendingOutput ? [site.pendingOutput] : []);
+    if (pending.length) {
+      const target = state.logistics.storages.find((storage) => pending.every((item) => canStoreResource(storage, item.resource, item.amount)));
+      if (!target) { site.waitingReason = "Magazyn docelowy jest pełny"; continue; }
+      carrier.cargo = pending.map((item) => ({ ...item }));
+      carrier.returnWorksiteId = site.id;
+      carrier.logisticsTask = "deliver-output";
+      carrier.targetStorageId = target.id;
+      carrier.status = "hauling-output";
+      site.pendingOutput = undefined;
+      site.pendingOutputs = undefined;
+      site.waitingReason = undefined;
+      continue;
+    }
+    if (recipe.input) {
+      const buffered = site.inputBuffer?.[recipe.input.resource] ?? 0;
+      const progress = site.productionProgress ?? 0;
+      if (progress <= 0 && buffered < recipe.input.amount) {
+        if (carrier.status !== "working") continue;
+        const source = findStorageWithResource(state.logistics, recipe.input.resource, recipe.input.amount, site);
+        if (!source) {
+          site.waitingReason = "Brak surowca wejściowego: " + RESOURCE_DEFINITIONS[recipe.input.resource].name;
+          continue;
+        }
+        // Dispatch first. Inventory is withdrawn only when the worker reaches the source store.
+        carrier.cargo = undefined;
+        carrier.returnWorksiteId = site.id;
+        carrier.logisticsTask = "fetch-input";
+        carrier.targetStorageId = source.id;
+        carrier.status = "fetching-input";
+        site.waitingReason = undefined;
+        continue;
+      }
+      if (progress <= 0 && buffered >= recipe.input.amount) {
+        const remainingInput = buffered - recipe.input.amount;
+        site.inputBuffer ??= {};
+        if (remainingInput <= 0.000001) delete site.inputBuffer[recipe.input.resource];
+        else site.inputBuffer[recipe.input.resource] = remainingInput;
+      }
+    }
+    site.waitingReason = undefined;
+    site.productionProgress = (site.productionProgress ?? 0) + delta * getFearWorkMultiplier(state.fear);
+    if (site.productionProgress >= recipe.cycleSeconds) {
+      site.productionProgress = 0;
+      site.productionCycles = (site.productionCycles ?? 0) + 1;
+      const outputs: { resource: ResourceId; amount: number }[] = [{
+        resource: site.outputVariant && site.outputVariant in RESOURCE_DEFINITIONS ? site.outputVariant : recipe.output.resource,
+        amount: recipe.output.amount
+      }];
+      if (recipe.byproduct && site.productionCycles % recipe.byproduct.everyCycles === 0) {
+        outputs.push({ resource: recipe.byproduct.resource, amount: recipe.byproduct.amount });
+      }
+      site.pendingOutputs = outputs;
+      site.pendingOutput = undefined;
+      const target = state.logistics.storages.find((storage) => outputs.every((item) => canStoreResource(storage, item.resource, item.amount)));
+      if (!target) {
+        site.waitingReason = "Magazyn docelowy jest pełny";
+      } else {
+        carrier.cargo = outputs.map((item) => ({ ...item }));
+        carrier.returnWorksiteId = site.id;
+        carrier.logisticsTask = "deliver-output";
+        carrier.targetStorageId = target.id;
+        carrier.status = "hauling-output";
+        site.pendingOutputs = undefined;
+      }
+    }
+  }
 }
 
 export interface PopularityModifiers {
@@ -278,8 +491,9 @@ function removeWorkerFromSite(state: SimulationState, villagerId: string): void 
 }
 
 function startVillagerDeparture(state: SimulationState): boolean {
+  // A civilian carrying goods must finish the delivery before the population can dismiss them.
   const leaving = state.villagers
-    .filter((villager) => villager.status !== "leaving")
+    .filter((villager) => villager.status !== "leaving" && !villager.cargo?.length)
     .sort((left, right) => {
       const leftSite = state.worksites.find((site) => site.id === left.worksiteId);
       const rightSite = state.worksites.find((site) => site.id === right.worksiteId);
@@ -353,6 +567,7 @@ export function setHovelCapacity(state: SimulationState, delta: number): void {
 
 export function getPopularityModifiers(state: SimulationState): PopularityModifiers {
   syncPopulationCounters(state);
+  syncResourceCounters(state);
   state.fear = calculateFearFactor(state.fearObjects, state.population);
   const tax = TAX_RULES[state.tax];
   const effectiveRation: RationLevel = state.food <= 0 ? 0 : state.ration;
@@ -386,12 +601,12 @@ export function getPopularityModifiers(state: SimulationState): PopularityModifi
 export function settleMonth(state: SimulationState): MonthlyReport {
   const messages: string[] = [];
   syncPopulationCounters(state);
+  syncResourceCounters(state);
   const tax = TAX_RULES[state.tax];
   const effectiveRation: RationLevel = state.food <= 0 ? 0 : state.ration;
   const consumptionPerVillager: Record<RationLevel, number> = { 0: 0, 0.5: 0.1, 1: 0.2, 1.5: 0.32, 2: 0.4 };
   const requestedFood = state.population * consumptionPerVillager[effectiveRation];
-  const foodConsumed = Math.min(state.food, requestedFood);
-  state.food = Math.max(0, state.food - foodConsumed);
+  const foodConsumed = consumeStoredFood(state, requestedFood);
   const shortage = requestedFood > 0 && foodConsumed + 0.0001 < requestedFood;
   const rationModifier = shortage
     ? -8
@@ -406,7 +621,7 @@ export function settleMonth(state: SimulationState): MonthlyReport {
   const beerBonus = beerAvailable
     ? (beerCoverage >= 1 ? 8 : beerCoverage >= 0.75 ? 6 : beerCoverage >= 0.5 ? 4 : beerCoverage >= 0.25 ? 2 : 0)
     : 0;
-  if (beerAvailable) state.beerBarrels = Math.max(0, state.beerBarrels - beerMonthlyUse);
+  if (beerAvailable) spendStoredResource(state, "beer", beerMonthlyUse);
 
   const religionPassive =
     (state.worksites.some((site) => site.kind === "religion" && site.buildingType === "church") ? 1 : 0) +

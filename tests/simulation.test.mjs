@@ -4,7 +4,7 @@ import {
   createSimulation, settleMonth, advanceSimulation, setGameSpeed, advancePopulation,
   addWorksite, assignAvailableWorkers, recruitFromCampfire, setHovelCapacity, setWorksiteEnabled, removeWorksite,
   calculateFearFactor, getFearWorkMultiplier, getFearDamageMultiplier,
-  getPopularityModifiers, updateBlessedShare
+  getPopularityModifiers, updateBlessedShare, depositStoredResource
 } from '../src/engine/simulation.ts';
 import { createWorldGrid, isWalkableAtWorld, findGridPath } from '../src/engine/grid.ts';
 
@@ -36,16 +36,23 @@ test('miesięczne zużycie żywności odpowiada tabeli racji wyłącznie dla mie
 });
 
 test('pusty spichlerz lub niedobór obniża popularność racjami do -8', () => {
-  const empty = createSimulation(); empty.food = 0;
+  const empty = createSimulation();
+  empty.logistics.storages.find((storage) => storage.type === 'granary').inventory = {};
   assert.equal(settleMonth(empty).modifiers.ration, -8);
-  const shortage = createSimulation(); shortage.food = 0.1;
+  const shortage = createSimulation();
+  shortage.logistics.storages.find((storage) => storage.type === 'granary').inventory.apples = 0.1;
   assert.equal(settleMonth(shortage).modifiers.ration, -8);
 });
 
 test('różnorodność żywności działa tylko przy dodatnich racjach', () => {
-  const state = createSimulation(); state.foodTypes = 4;
+  const state = createSimulation();
+  const granary = state.logistics.storages.find((storage) => storage.type === 'granary');
+  granary.inventory.cheese = 10; granary.inventory.meat = 10; granary.inventory.bread = 10;
   assert.equal(settleMonth(state).modifiers.variety, 3);
-  const none = createSimulation(); none.foodTypes = 4; none.ration = 0;
+  const none = createSimulation();
+  const emptyRationGranary = none.logistics.storages.find((storage) => storage.type === 'granary');
+  emptyRationGranary.inventory.cheese = 10; emptyRationGranary.inventory.meat = 10; emptyRationGranary.inventory.bread = 10;
+  none.ration = 0;
   assert.equal(settleMonth(none).modifiers.variety, 0);
 });
 
@@ -82,13 +89,13 @@ test('gospoda daje bonus tylko po obsadzeniu karczmarzem i zużywa 0.144 beczki'
   assignAvailableWorkers(state);
   const innKeeper = state.villagers.find((villager) => villager.worksiteId === 'inn-1');
   innKeeper.status = 'working';
-  state.beerBarrels = 1;
+  depositStoredResource(state, 'stockpile', 'beer', 1);
   const report = settleMonth(state);
   assert.equal(report.modifiers.beer, 8);
   assert.ok(Math.abs(state.beerBarrels - 0.856) < 1e-9);
   const unstaffed = createSimulation();
   unstaffed.worksites.push({ id: 'inn-1', kind: 'inn', requiredWorkers: 1, workerIds: [], x: 1400, y: 1000 });
-  unstaffed.beerBarrels = 1;
+  depositStoredResource(unstaffed, 'stockpile', 'beer', 1);
   assert.equal(settleMonth(unstaffed).modifiers.beer, 0);
 });
 
@@ -209,7 +216,6 @@ test('rekrutacja zużywa jednego bezrobotnego, ale nie zmienia pojemności chat'
 
 test('poniżej popularności 50 mieszkańcy odchodzą, zaczynając od pracowników produkcji', () => {
   const state = createSimulation();
-  state.food = 0;
   state.ration = 0;
   state.tax = 'cruel';
   state.popularity = 10;
@@ -256,7 +262,7 @@ test('popularność pozostaje ograniczona do 0–100', () => {
   const high = createSimulation(); high.popularity = 100; high.ration = 2;
   settleMonth(high);
   assert.equal(high.popularity, 100);
-  const low = createSimulation(); low.popularity = 1; low.food = 0; low.ration = 0; low.tax = 'cruel';
+  const low = createSimulation(); low.popularity = 1; low.ration = 0; low.tax = 'cruel';
   settleMonth(low);
   assert.equal(low.popularity, 0);
 });

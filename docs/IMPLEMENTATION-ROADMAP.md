@@ -39,17 +39,28 @@ Zakres: sekcja 4 specyfikacji.
 - Pełny bilans racji i różnorodności, podatków/łapówek, piwa, religii i Fear Factor.
 - Rzeczywiste obiekty Dobrych i Złych Rzeczy, księża i wygasające błogosławieństwa.
 - Raport popularności „W nadchodzącym miesiącu” z rozbiciem wszystkich modyfikatorów.
-**Status: wdrożony w zakresie populacji, zatrudniania, obsługi miejsc pracy i podstawowego bilansu popularności.** Dostawy beczek piwa oraz realna wydajność łańcuchów produkcji pozostają zależne od etapu 4, a właściwy interfejs rekrutacji i pełne koszty oddziałów od etapu 5.
+**Status: wdrożony w zakresie populacji, zatrudniania, obsługi miejsc pracy i podstawowego bilansu popularności.** Fizyczne dostawy piwa i integrację wydajności produkcji wykonuje etap 4; pełny interfejs rekrutacji, ceny i pobieranie uzbrojenia należą do etapu 5.
 
 ### Etap 4 — magazyny, logistyka i łańcuchy produkcyjne
 Zakres: sekcja 5 specyfikacji oraz fizyczne zasoby z sekcji 1.
-- Fizyczny Skład, Spichlerz i Zbrojownia z pojemnością pól; złoto pozostaje zasobem globalnym.
-- Dostawy piesze, trasy pracowników, czas produkcji zależny od odległości i blokada przy pełnym magazynie.
-- Rozbudowa magazynów modułami i sprzedaż nadwyżek.
-- Oaza, drzewa, jelenie, kamień, żelazo i smoła jako rzeczywiste zasoby mapy.
-- Wszystkie łańcuchy żywności, piwa, surowców, broni i pancerzy oraz zależności wejścia/wyjścia.
-- Targowisko z ręcznym handlem, stałymi cenami, spreadem i kontrolą wolnego miejsca.
-**Status: do wykonania.**
+- Fizyczny Skład, Spichlerz i Zbrojownia z odrębnymi polami i limitami pojemności. Złoto pozostaje zasobem globalnym; HUD pokazuje sumę towaru przechowywanego fizycznie.
+- Pracownicy realizują kursy po siatce: dojście do magazynu, pobranie surowca, powrót do budynku, przetworzenie, zabranie produktu i dostawa do właściwego magazynu. Towar nie zwiększa stanu zapasów, dopóki kurier faktycznie nie dotrze.
+- Pełny magazyn wstrzymuje rozładunek/produkcję; pracownik czeka z ładunkiem. Budynki i moduły nie mogą być zburzone, gdy zawierają towary lub istnieje aktywny transport do/z nich.
+- Magazyny można rozbudować dostawianym obok modułem (+25 pól). Zmniejszenie pojemności jest blokowane, gdy towary zajęłyby pola usuwanego modułu.
+- Zasoby źródłowe są sprawdzane przy stawianiu budynków: las, złoże kamienia, złoże żelaza, bagno smołowe, oaza oraz oznaczone punkty jeleni. Farma jest dostępna wyłącznie na oazie, a kopalnie/warsztat smoły na właściwym złożu.
+- Zaimplementowano produkcję drewna, kamienia (z obowiązkowym wołem wożącym partie po 8), żelaza, smoły, jabłek, mięsa, sera i bydła, pszenicy, mąki, chleba, chmielu, piwa oraz uzbrojenia i pancerzy.
+- Łańcuchy przetwarzania używają fizycznych wejść/wyjść: pszenica → mąka → chleb (1 mąka = 8 chlebów); chmiel → piwo → gospoda; bydło z farmy mlecznej → garbarz. Panel warsztatu umożliwia wybór łuku/kuszy, włóczni/piki i buzdyganu/miecza.
+- Targowisko oferuje wyłącznie handel ręczny, stałe ceny zakupu/sprzedaży i partie 1/5 sztuk. Zakup jest blokowany, jeśli właściwy magazyn nie ma wolnych pól; nieudana sprzedaż nie usuwa częściowego towaru.
+- Zapis obejmuje magazyny, zawartość, moduły, cykle produkcji, kolejki dostaw i ładunki pracowników. Stare zapisy z etapów 2–3 są migrowane z dawnych liczników zasobów do magazynów.
+**Status: implementacja i testy ukończone; wdrożenie następuje w bieżącym wydaniu po synchronizacji z `main`.**
+
+**Parametry strojenia — nie są wartościami narzuconymi przez specyfikację**
+- Pojemność startowa: 100 pól na magazyn; moduł: +25 pól.
+- Rozmiary stosów, koszty budowli/modułów, ceny większości towarów i długości cykli produkcji są ustawieniami bazowymi prototypu. Specyfikacja definiuje przepływy, pracowników i przykład spreadu handlu, ale nie podaje pełnych wartości liczbowych.
+- Ceny żywności na rynku przyjęto zgodnie z przykładem w specyfikacji (kupno 8, sprzedaż 4); pozostałe towary mają stałe ceny konfigurowalne w `src/engine/logistics.ts`.
+- Punkty jeleni są na razie oznaczonymi, stałymi punktami mapy, a źródła lasu/oazy/złóż nie są jeszcze wyczerpywane po określonej liczbie cykli — specyfikacja nie definiuje ilości ani tempa odnowy tych zasobów.
+- Stary zapis miał wyłącznie łączną liczbę żywności, bez podziału na typy. Migrator zachowuje ilość, przydzielając historyczny zapas do jabłek; dokładnej dawnej różnorodności nie da się odtworzyć z tego formatu.
+
 
 ### Etap 5 — twierdza, fortyfikacje i pełne wojsko
 Zakres: sekcje 6 i 7 oraz Lord/warunki zwycięstwa i porażki z sekcji 1.
@@ -149,8 +160,8 @@ Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
 - Ręczny test wizualny/przeglądarkowy nie został wykonany na VPS: środowisko headless Chromium wcześniej nie startowało z powodu braku biblioteki systemowej libatk-1.0.so.0. Nie zmieniano bibliotek systemowych serwera.
 
 **Granice etapu 2 — świadomie pozostawione na później**
-- Pełne mechaniki 51 pozostałych pozycji katalogu: m.in. magazyny/produkcja/handel z etapu 4 oraz fortyfikacje, fosy i pozostałe budynki wojskowe z etapu 5.
-- Przełącznik pracy jest dostępny dla obecnych budynków z miejscem pracy (młyn, budynki religijne i gospoda); pracownicy wracają trasą do ogniska, a po wznowieniu wolne miejsca są obsadzane. Szczegółowe sterowanie produkcją, zakupy/sprzedaż na targu i pełne ekrany ekonomii wymagają danych i mechanik etapów 4–6.
+- Katalog ma 52 pozycje; aktywne mechaniki etapu 4 obejmują magazyny, przemysł, rolnictwo, produkcję broni/żywności i targowisko. Nadal nieaktywne są m.in. fortyfikacje, fosy i pozostałe budynki wojskowe z etapu 5.
+- Przełącznik pracy jest dostępny dla obecnych budynków z miejscem pracy; magazyny, panele produkcji i ręczny handel są dostarczone w etapie 4. Pełne wykresy ekonomii oraz pozostałe sterowanie zależne od fortyfikacji/armii pozostają do integracji w etapach 5–6.
 - Prawdziwy ranking Lordów, rozkazy sojuszniczym botom i transfery zasobów wymagają systemu Lordów i AI z etapów 5–6.
 - Patrol, ostrzał punktu, rekrutacja i pełen zestaw rozkazów specjalnych zostają do etapu 5.
 - Zapis jest lokalny dla przeglądarki/originu; nie jest synchronizowany między urządzeniami.

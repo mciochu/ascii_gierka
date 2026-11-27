@@ -309,3 +309,13 @@ button:disabled { opacity: .38; cursor: not-allowed !important; }
 .worksite-controls button { border: 1px solid #39464a; background: #0c1214; color: #c8d5d8; padding: 6px 8px; cursor: pointer; font: 7px var(--mono); }
 .worksite-controls button:hover:not(:disabled) { border-color: #b99a58; color: #f0d58e; }
 .map-compass b { transform-origin: center center; transition: transform .12s ease; }
+
+
+.storage-panel, .market-panel { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+.storage-panel > button { border: 1px solid #625234; background: #17140e; color: #e8c77d; padding: 7px; cursor: pointer; font: 7px var(--mono); }
+.market-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; align-items: center; border-top: 1px solid #263236; padding: 4px 0; font: 7px var(--mono); }
+.market-row span { display: flex; flex-direction: column; gap: 2px; color: #d7d2c2; }
+.market-row small { color: #829194; font-size: 6px; }
+.market-row > div, .variant-controls { display: flex; flex-wrap: wrap; gap: 2px; }
+.market-row button, .variant-controls button { border: 1px solid #39474a; background: #0c1214; color: #d4dfe0; padding: 4px 5px; cursor: pointer; font: 7px var(--mono); }
+.market-row button:hover:not(:disabled), .variant-controls button:hover:not(:disabled), .variant-controls button.active { border-color: #b99a58; color: #f0d58e; }

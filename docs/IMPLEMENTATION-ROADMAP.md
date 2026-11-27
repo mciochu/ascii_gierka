@@ -30,7 +30,7 @@ Zakres: sekcje 2 i 3 specyfikacji.
 - Klasyczny schemat LPM: wybór i wydawanie rozkazów zależnie od kontekstu.
 - Portrety typów jednostek, rozkazy specjalne, menu gestów kamery, minimapa i zakładki kamery.
 - Skróty opisane w dokumencie, edge-scroll, flatten, zoom oraz pełne zachowanie pauzy.
-**Status: do wykonania.**
+**Status: wdrożony w zakresie HUD i klasycznego sterowania.** Dostępne są obecne systemy prototypu; pozycje wymagające przyszłej ekonomii, fortyfikacji lub Lordów AI pozostają jawnie nieaktywne.
 
 ### Etap 3 — mieszkańcy, populacja i popularność
 Zakres: sekcja 4 specyfikacji.
@@ -118,3 +118,38 @@ Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
 - Lord, jego samoobrona, śmierć i warunek porażki nie są jeszcze wdrożone; to etap 5.
 - Zasoby złoża są oznaczone na mapie, ale wydobycie i łańcuchy transportu są etapem 4.
 - Pełne UI obrotu i menu gestów kamery, minimapa, HUD i pozostałe skróty są etapem 2.
+
+
+### Etap 2 — HUD i klasyczne sterowanie (2026-11-27)
+
+**Interfejs i katalog**
+- index.html oraz src/style.css: stały dolny HUD, który można ukryć klawiszem Tab lub gestem kamery. Układ ma sześć tarcz kategorii, środkowy panel kontekstowy oraz prawy panel Skryby, narzędzi i minimapy. Topbar zachowuje zasoby, miesiąc, popularność, prędkość i pauzę.
+- src/ui/catalog.ts: katalog sześciu kategorii i 52 pozycji zgodnych z listą w specyfikacji. Jedyną pozycją aktywnej budowy jest istniejąca w prototypie Wieża strażnicza (70 drewna, 30 kamienia). Reszta jest widoczna, ale nieaktywna, dopóki nie powstaną jej mechaniki w etapach 4–5.
+- Panel kontekstowy pokazuje katalog, szczegóły zaznaczonego obiektu albo grupy jednostek. Jednostki są grupowane według typu, mają liczebność oraz trzy przyciski postaw: Utrzymać pozycję, Obronna, Agresywna. Dostępne są rozkazy Stop i Atak w ruchu.
+- Skryba prezentuje na żywo popularność (kolor i mimika), złoto oraz populację. Księga raportów pokazuje bieżącą prognozę bilansu popularności z rozbiciem modyfikatorów oraz armię pogrupowaną według typów.
+- Minimapę renderują wyłącznie znaki Unicode: uproszczone rodzaje terenu, budowle, oddziały własne i wrogie oraz ramka aktualnego widoku. Kliknięcie i przeciągnięcie przesuwa kamerę.
+- Przyciski Undo i burzenia działają dla wież wzniesionych w tej rozgrywce: cofnięcie zwraca 100% znanych kosztów, burzenie 50%. Startowe budynki nie są niszczone, ponieważ ich koszt nie jest zapisany w modelu. Ranking pokazuje dane gracza i aktualnego oddziału rozbójników; dyplomacja wyjaśnia brak sojuszników AI w obecnym prototypie.
+- Opcje udostępniają zmianę prędkości, widok/ukrywanie HUD, ustawienie racji i podatków/łapówek oraz zapis i wczytanie stanu w localStorage przeglądarki (klucz dominium.save.v1, wersja formatu 1). Zapis obejmuje symulację, obiekty, rozkazy i postawy oddziałów, wieże, zaznaczenie, grupy kontrolne, historię Undo, ustawienia widoku i zakładki kamery. Wczytywanie waliduje strukturę oraz zakresy danych przed odtworzeniem świata.
+- Raporty rankingowe i dyplomatyczne nie udają jeszcze pełnej ekonomii lub Lordów AI. Wykresy ekonomiczne nie zostały dodane, bo właściwe magazyny i łańcuchy danych powstaną w etapie 4.
+
+**Sterowanie**
+- LPM wybiera obiekt, zaznacza prostokątem, wydaje rozkaz ruchu/ataku, stawia wieżę lub burzy ją — zależnie od kontekstu. Dwuklik własnej jednostki wybiera widoczne jednostki tego samego typu. Shift+LPM kolejkuje punkt trasy.
+- PPM na mapie anuluje aktywny tryb lub czyści zaznaczenie; przytrzymanie i przeciągnięcie otwiera 4-kierunkowe menu kamery: góra — obrót, dół — spłaszczenie, prawo — zoom, lewo — HUD.
+- PPM na portrecie typu jednostki usuwa ten typ z zaznaczenia. Środkowy przycisk przeciąga kamerę.
+- Strzałki oraz krawędzie mapy przewijają kamerę; Spacja przełącza spłaszczenie, V tymczasowo je włącza, X/C obracają, Z przełącza zoom, P pauzuje, +/- reguluje prędkość.
+- Ctrl+Alt+0–9 zapisuje zakładkę kamery, Alt+0–9 ją przywraca; Ctrl+0–9 przypisuje grupę wojska, sam klawisz wybiera grupę. H/G/M/B/N/I/S skaczą do istniejących lub przewidzianych punktów kluczowych, a Shift+klawisz wraca do poprzedniego widoku.
+- Trzy postawy mają działające zachowanie prototypowe: „Utrzymać pozycję” atakuje wyłącznie cel w zasięgu i nie podchodzi; „Obronna” ściga pobliskie zagrożenie i wraca do punktu startu; „Agresywna” ściga wykrytego przeciwnika niezależnie od dystansu. Wszystkie ścieżki ruchu korzystają z nawigacji siatkowej z etapu 1.
+
+**Wynik testów**
+- 28/28 testów automatycznych PASS (w tym 4 testy katalogu i 3 testy powłoki HUD/sterowania).
+- TypeScript PASS.
+- Vite production build PASS.
+- git diff --check PASS przed zatwierdzeniem.
+- Ręczny test wizualny/przeglądarkowy nie został wykonany na VPS: środowisko headless Chromium wcześniej nie startowało z powodu braku biblioteki systemowej libatk-1.0.so.0. Nie zmieniano bibliotek systemowych serwera.
+
+**Granice etapu 2 — świadomie pozostawione na później**
+- Pełne mechaniki 51 pozostałych pozycji katalogu: m.in. magazyny/produkcja/handel z etapu 4 oraz fortyfikacje, fosy i pozostałe budynki wojskowe z etapu 5.
+- Panele sterowania pracą każdego budynku, zakup/sprzedaż na targu i pełne ekrany ekonomii wymagają danych i mechanik etapów 4–5.
+- Prawdziwy ranking Lordów, rozkazy sojuszniczym botom i transfery zasobów wymagają systemu Lordów i AI z etapów 5–6.
+- Patrol, ostrzał punktu, rekrutacja i pełen zestaw rozkazów specjalnych zostają do etapu 5.
+- Zapis jest lokalny dla przeglądarki/originu; nie jest synchronizowany między urządzeniami.

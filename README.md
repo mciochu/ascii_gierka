@@ -29,12 +29,21 @@ Production output is generated in `dist/`.
 
 ## Controls
 
-- Drag with the middle or right mouse button to pan the map.
-- Use the mouse wheel to zoom.
-- Select a unit or building by clicking it.
-- Select **MOVE**, then click the map to issue a movement order to a selected unit.
-- Select **BUILD**, then choose a watchtower and click the map to place it.
-- WASD or arrow keys pan the camera.
+- **Left click** a unit or building to select it.
+- **Left-drag** across the battlefield to box-select several friendly units.
+- **Shift + left click/drag** adds to the selection; **Ctrl + left click/drag** toggles objects in it.
+- **Double-click** a friendly unit to select all visible friendly units of the same type.
+- **Right click** open ground to move the selected units in formation.
+- **Shift + right click** queues another movement order.
+- **Right click** an enemy to attack it.
+- **A** enables attack-move; units engage enemies they encounter on the way.
+- **S** stops selected units; **H** makes them hold position.
+- **Ctrl + 1–9** saves a control group; **1–9** selects it.
+- **B** enters watchtower placement; click free ground to build.
+- **Middle mouse drag** pans the map; the mouse wheel zooms.
+- **Arrow keys** move the camera; **Esc** returns to selection mode.
+
+The map is rendered on a pure black field. Terrain, water, wood, stone, buildings, friendly troops and enemies use differently coloured Unicode glyphs. Glyph positions are continuous world coordinates and are not restricted to terminal rows or a tile grid.
 
 ## Design principles
 

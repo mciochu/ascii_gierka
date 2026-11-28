@@ -34,16 +34,24 @@ test("zamknięta brama blokuje trasę, a otwarta ponownie dopuszcza ruch", () =>
   const gate = {
     id: "gate-small-1", fortificationKind: "gate-small", gridCol: tile.col, gridRow: tile.row,
     gateOpen: false, underlyingTerrain: tile.terrain, underlyingWalkable: tile.walkable,
-    underlyingBuildable: tile.buildable, health: 320, maxHealth: 320
+    underlyingBuildable: tile.buildable, health: 320, maxHealth: 320,
+    group: { children: [
+      { label: "gate-open-left", alpha: 0 },
+      { label: "gate-open-right", alpha: 0 }
+    ] }
   };
   assert.equal(applyFortificationToTile(grid, gate), true);
   assert.equal(tile.walkable, false);
   assert.equal(fortificationBlocks("gate-small", false), true);
   assert.equal(setFortificationGate(grid, gate, true), true);
   assert.equal(tile.walkable, true);
+  assert.equal(gate.group.children[0].alpha, 0.98);
+  assert.equal(gate.group.children[1].alpha, 0.98);
   assert.equal(fortificationBlocks("gate-small", true), false);
   assert.equal(setFortificationGate(grid, gate, false), true);
   assert.equal(tile.walkable, false);
+  assert.equal(gate.group.children[0].alpha, 0);
+  assert.equal(gate.group.children[1].alpha, 0);
 });
 
 test("fosa zmienia rodzaj terenu, blokuje ruch i zachowuje go do odtworzenia", () => {

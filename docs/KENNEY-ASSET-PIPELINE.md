@@ -5,5 +5,3 @@ The repository retains the original Kenney Medieval RTS CC0 atlas and its conver
 The live game now uses `src/engine/teutonic-art.ts`, a hand-composed Unicode glyph catalogue for the Teutonic Order / Polish frontier visual direction. The atlas PNG is not loaded by the browser and the generated Kenney helper is no longer imported by the world renderer.
 
 The source attribution and original license are retained in `assets/kenney-medieval-rts/License.txt`.
-
-[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

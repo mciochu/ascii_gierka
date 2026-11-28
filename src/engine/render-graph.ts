@@ -162,7 +162,7 @@ void main() {
       bool buildingEdge = layer == 1 && buildingEdgeAt(p);
       int priority = 1;
       if (emissiveStrength > 1.0 || layer == 3) priority = 4;
-      else if (layer == 2) priority = 3;
+      else if (layer == 2 || layer == 4) priority = 3;
       else if (layer == 1 && buildingEdge) priority = 2;
 
       float score = float(priority) * 10.0 + lum;
@@ -312,7 +312,9 @@ void main() {
     else glyphIndex = 19;
   }
   vec3 chroma = stats.rgb / max(averageL, 0.018);
-  vec3 cellColor = clamp(chroma * vec3(0.82, 0.94, 1.10), 0.0, 2.4) * level;
+  // Preserve the material's own hue; the previous cyan bias washed out
+  // forest and earth tones at strategic zoom.
+  vec3 cellColor = clamp(chroma * vec3(1.05, 1.0, 0.86), 0.0, 2.4) * level;
   float whiteMix = smoothstep(0.75, 1.35, level);
   cellColor = mix(cellColor, vec3(level * 1.15), whiteMix * 0.72);
   cellColor *= mix(0.98, 1.0, uZoomNorm);

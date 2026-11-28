@@ -98,36 +98,45 @@ test("priorytety próbkowania komórki zachowują jednostki, krawędzie, selekcj
 });
 
 test("profil zoomu zmienia teren, bloom, próg krawędzi i rozmiar oddziału", () => {
-  const far = getZoomProfile(0.28);
+  const far = getZoomProfile(0.15);
   assert.equal(far.zoomNorm, 0);
   assert.equal(far.lodTier, "strategic");
-  assert.equal(far.terrainMaxLuminance, 0.09);
-  assert.equal(far.bloomRadiusScale, 0.45);
-  assert.equal(far.bloomIntensityScale, 0.65);
-  assert.equal(far.edgeThreshold, 0.14);
-  assert.equal(far.unitScale, 1.25);
+  assert.equal(far.terrainMaxLuminance, 0.16);
+  assert.equal(far.bloomRadiusScale, 0.38);
+  assert.equal(far.bloomIntensityScale, 0.62);
+  assert.equal(far.edgeThreshold, 0.13);
+  assert.equal(far.unitScale, 1.12);
+  const half = getZoomProfile(0.5);
+  assert.equal(half.lodTier, "strategic");
   const standard = getZoomProfile(1.0);
-  assert.ok(Math.abs(standard.zoomNorm - (1 / 3)) < 1e-10);
+  assert.ok(Math.abs(standard.zoomNorm - (0.85 / 1.85)) < 1e-10);
   assert.equal(standard.lodTier, "standard");
   const close = getZoomProfile(2.0);
   assert.equal(close.zoomNorm, 1);
   assert.equal(close.lodTier, "close");
-  assert.ok(Math.abs(close.terrainMaxLuminance - 0.20) < 1e-10);
+  assert.ok(Math.abs(close.terrainMaxLuminance - 0.23) < 1e-10);
   assert.equal(close.bloomRadiusScale, 1);
   assert.equal(close.bloomIntensityScale, 1);
   assert.ok(Math.abs(close.edgeThreshold - 0.24) < 1e-10);
   assert.equal(close.unitScale, 1);
+  assert.equal(getZoomProfile(0.68).lodTier, "strategic");
+  assert.equal(getZoomProfile(0.69).lodTier, "standard");
+  assert.equal(getZoomProfile(3).zoomNorm, 1);
 });
 
 
-test("screen-space clamp utrzymuje minimum komórek również na HiDPI", () => {
+test("screen-space clamp utrzymuje rozmiar ekranowy także przy oddaleniu i HiDPI", () => {
   assert.deepEqual(screenSpaceGlyphMinimum([1, 2], 10, 14, 2), [5, 14]);
   assert.deepEqual(screenSpaceGlyphMinimum([1, 1], 12, 16, 2), [6, 8]);
   assert.deepEqual(screenSpaceGlyphMinimum([1, 2], 5, 7, 1), [5, 14]);
+  const overviewSize = screenSpaceGlyphMinimum([2, 2], 5, 7, 1, 0.15);
+  assert.ok(Math.abs(overviewSize[0] - 200 / 3) < 1e-10);
+  assert.ok(Math.abs(overviewSize[1] - 280 / 3) < 1e-10);
+  assert.deepEqual(screenSpaceGlyphMinimum([1, 1], 5, 7, 2, 0.5), [5, 7]);
 });
 
-test("promień klikalności oddziału pozostaje stały w pikselach przy zoomie 0.5×, 1× i 2×", () => {
-  for (const zoom of [0.5, 1, 2]) {
+test("promień klikalności oddziału pozostaje stały w pikselach przy zoomie 0.15×, 0.5×, 1× i 2×", () => {
+  for (const zoom of [0.15, 0.5, 1, 2]) {
     const worldRadius = unitPickRadiusWorld(zoom, 7);
     assert.ok(Math.abs(worldRadius * zoom - 14) < 1e-10);
   }

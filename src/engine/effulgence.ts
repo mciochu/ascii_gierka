@@ -85,36 +85,42 @@ export function screenSpaceGlyphMinimum(
   minCells: readonly [number, number],
   cellWidthPhysical: number,
   cellHeightPhysical: number,
-  pixelRatio: number
+  pixelRatio: number,
+  zoom = 1
 ): readonly [number, number] {
   const ratio = Number.isFinite(pixelRatio) ? Math.max(1, pixelRatio) : 1;
+  const safeZoom = Number.isFinite(zoom) ? Math.max(0.15, Math.min(2, zoom)) : 1;
+  // GlyphBatch transforms records before Pixi applies the camera container scale.
+  // Compensate here so minScreenCells remains a true on-screen size at every zoom.
   return [
-    Math.max(0, minCells[0]) * Math.max(1, cellWidthPhysical) / ratio,
-    Math.max(0, minCells[1]) * Math.max(1, cellHeightPhysical) / ratio
+    Math.max(0, minCells[0]) * Math.max(1, cellWidthPhysical) / ratio / safeZoom,
+    Math.max(0, minCells[1]) * Math.max(1, cellHeightPhysical) / ratio / safeZoom
   ];
 }
 
 /** World-space pick radius that stays constant in screen pixels across zoom levels. */
 export function unitPickRadiusWorld(zoom: number, glyphCellHeight: number): number {
-  const safeZoom = Number.isFinite(zoom) ? Math.max(0.5, Math.min(2.0, zoom)) : 1;
+  const safeZoom = Number.isFinite(zoom) ? Math.max(0.15, Math.min(2.0, zoom)) : 1;
   const screenRadius = Math.max(14, Math.max(1, glyphCellHeight) * 1.5);
   return screenRadius / safeZoom;
 }
 
 export function getZoomProfile(zoom: number): EffulgenceZoomProfile {
-  const safeZoom = Number.isFinite(zoom) ? Math.max(0.5, Math.min(2.0, zoom)) : 1.0;
-  const zoomNorm = Math.max(0, Math.min(1, (safeZoom - 0.5) / (2.0 - 0.5)));
-  const lodTier: GlyphLodTier = safeZoom <= 0.65
+  const safeZoom = Number.isFinite(zoom) ? Math.max(0.15, Math.min(2.0, zoom)) : 1.0;
+  const zoomNorm = Math.max(0, Math.min(1, (safeZoom - 0.15) / (2.0 - 0.15)));
+  const lodTier: GlyphLodTier = safeZoom <= 0.68
     ? "strategic"
     : safeZoom >= 1.5 ? "close" : "standard";
   return {
     zoomNorm,
     lodTier,
-    terrainMaxLuminance: 0.09 + 0.11 * zoomNorm,
-    bloomRadiusScale: 0.45 + 0.55 * zoomNorm,
-    bloomIntensityScale: 0.65 + 0.35 * zoomNorm,
-    edgeThreshold: 0.14 + 0.10 * zoomNorm,
-    unitScale: lodTier === "strategic" ? 1.25 : 1
+    // Strategic terrain must remain visible after the map has been reduced
+    // to macro-cells; the old 0.09 floor made distant land almost disappear.
+    terrainMaxLuminance: 0.16 + 0.07 * zoomNorm,
+    bloomRadiusScale: 0.38 + 0.62 * zoomNorm,
+    bloomIntensityScale: 0.62 + 0.38 * zoomNorm,
+    edgeThreshold: 0.13 + 0.11 * zoomNorm,
+    unitScale: lodTier === "strategic" ? 1.12 : 1
   };
 }
 

@@ -1,5 +1,8 @@
+[Reading 847 lines from start (total: 847 lines, 0 remaining)]
+
 import { Container } from "pixi.js";
 import { addGlyph, addWord, GlyphDisplay, type GlyphLodSet } from "./glyph";
+import { addKenneySprite } from "./kenney-sprites";
 import { HUNTING_NODES, type ProductionType, type StorageType } from "./logistics";
 import { applyFortificationToTile, canPlaceFortification, type FortificationKind } from "./fortifications";
 import { createWorldGrid, GRID_PIVOT, worldPositionForCell, type WorldGrid, type TerrainKind } from "./grid";
@@ -439,38 +442,20 @@ function makeUnit(
     archers: ")", crossbowmen: "}", pikemen: "█", swordsmen: "⚔",
     cavalry: "m", raiders: "*", lord: "♛"
   };
-  const silhouettes: Record<string, { close: string[]; standard: string[] }> = {
-    pikemen: { close: [" | ", "/|+", "|#|", "/|+", "/ +"], standard: [" |", "/#", "/ "] },
-    archers: { close: [" ) ", "/#)", "|#/", " / ", "/ #"], standard: [")/", "/#", "/ "] },
-    crossbowmen: { close: [" } ", "/#}", "|#/", "/| ", "/ #"], standard: ["}/", "/#", "/ "] },
-    swordsmen: { close: [" ⚔ ", "/|+", "|#|", "/|+", "/ +"], standard: ["⚔ ", "/#", "/ "] },
-    cavalry: { close: [" m ", "/|+", "|#|", "/|+", "v v"], standard: ["m ", "/|", "v "] },
-    raiders: { close: [" ! ", "/#/", "|x|", "/|+", "/ +"], standard: ["! ", "/#", "/ "] },
-    lord: { close: [" ♛ ", "/|+", "|#|", "/|+", "/ +"], standard: ["♛ ", "/#", "/ "] }
-  };
   const palette = team === "enemy" || variant === 3
     ? "#f07869"
     : role === "archers" || role === "crossbowmen" ? "#a5d6f1"
       : role === "lord" ? "#e5c987" : "#74c7f5";
-  const silhouette = silhouettes[role] ?? silhouettes.pikemen!;
+  const sourceVariant = Math.max(0, Math.min(5, variant));
+  const factionRow = team === "enemy" || variant === 3 ? 1 : 0;
+  const spriteNumber = factionRow * 6 + sourceVariant + 1;
+  const spriteId = `medievalUnit_${String(spriteNumber).padStart(2, "0")}`;
   offsets.forEach(([ox, oy]) => {
-    silhouette.close.forEach((row, rowIndex) => {
-      Array.from(row).forEach((character, columnIndex) => {
-        if (character === " ") return;
-        addGlyph(group, {
-          char: character, x: ox + (columnIndex - 1) * 5, y: oy + (rowIndex - 2) * 6.5,
-          size: 6, color: palette, alpha: 0.98, material: "unit", height: 0.24, lod: "close"
-        });
-      });
+    addKenneySprite(group, spriteId, ox, oy, {
+      cellSize: 5.2, material: "unit", height: 0.24, lod: "close"
     });
-    silhouette.standard.forEach((row, rowIndex) => {
-      Array.from(row).forEach((character, columnIndex) => {
-        if (character === " ") return;
-        addGlyph(group, {
-          char: character, x: ox + (columnIndex - 0.5) * 7, y: oy + (rowIndex - 1) * 8,
-          size: 8, color: palette, alpha: 0.98, material: "unit", height: 0.24, lod: "standard"
-        });
-      });
+    addKenneySprite(group, spriteId, ox, oy, {
+      cellSize: 4.2, material: "unit", height: 0.24, lod: "standard"
     });
   });
   addGlyph(group, {
@@ -753,9 +738,19 @@ export function createTownBuilding(
     bad: { glyph: "†", name: "Szubienica", role: "ZŁA RZECZ · STRACH", color: "#d16d65", label: "SZUBIENICA" }
   };
   const visual = visuals[type];
-  addGlyph(group, { char: type === "hovel" ? "⌂" : type === "bad" ? "†" : visual.glyph, x: 0, y: -7, size: type === "cathedral" ? 43 : 36, color: visual.color, weight: "bold", stroke: "#080a0b", strokeWidth: 1 });
-  if (type !== "good" && type !== "bad") {
-    addGlyph(group, { char: type === "hovel" ? "╱" : "═", x: 0, y: 8, size: 31, color: "#a9b5b9", alpha: 0.8 });
+  const spriteByType: Partial<Record<TownBuildingType, string>> = {
+    hovel: "medievalStructure_18",
+    chapel: "medievalStructure_04",
+    church: "medievalStructure_04",
+    cathedral: "medievalStructure_05",
+    inn: "medievalStructure_03"
+  };
+  const spriteId = spriteByType[type];
+  if (spriteId) {
+    addKenneySprite(group, spriteId, 0, -8, { cellSize: 4.8, material: "building", height: 0.3 });
+  } else {
+    addGlyph(group, { char: type === "hovel" ? "⌂" : type === "bad" ? "†" : visual.glyph, x: 0, y: -7, size: type === "cathedral" ? 43 : 36, color: visual.color, weight: "bold", stroke: "#080a0b", strokeWidth: 1 });
+    if (type !== "good" && type !== "bad") addGlyph(group, { char: type === "hovel" ? "╱" : "═", x: 0, y: 8, size: 31, color: "#a9b5b9", alpha: 0.8 });
   }
   addWord(group, visual.label, 0, 29, 7, visual.color, 0.76);
   group.position.set(x, y);
@@ -788,8 +783,11 @@ export function createStorageBuilding(
     armory: { glyph: "⚔", name: "Zbrojownia", role: "MAGAZYN · UZBROJENIE", color: "#9eb1c1", label: "ZBROJOWNIA" }
   };
   const visual = visuals[type];
-  addGlyph(group, { char: visual.glyph, x: 0, y: -8, size: 40, color: visual.color, weight: "bold", stroke: "#080a0b", strokeWidth: 1 });
-  addGlyph(group, { char: module ? "╫" : "═", x: 0, y: 12, size: 34, color: "#a9b5b9", alpha: 0.8 });
+  const spriteByType: Record<StorageType, string> = {
+    stockpile: "medievalStructure_03", granary: "medievalStructure_18", armory: "medievalStructure_05"
+  };
+  addKenneySprite(group, spriteByType[type], 0, -8, { cellSize: 4.8, material: "building", height: 0.3 });
+  if (module) addGlyph(group, { char: "╫", x: 0, y: 12, size: 24, color: "#a9b5b9", alpha: 0.8 });
   addWord(group, module ? "MODUŁ" : visual.label, 0, 34, 8, visual.color, 0.86);
   group.position.set(x, y);
   const id = module ? `${type}-module-${index}` : index === 0 && type === "stockpile" ? "stockpile" : `${type}-${index}`;
@@ -833,9 +831,21 @@ export function createProductionBuilding(
     market: { glyph: "⚖", name: "Targowisko", color: "#d0b06e", role: "HANDEL · RĘCZNY" }
   };
   const visual = visuals[type];
-  addGlyph(group, { char: visual.glyph, x: 0, y: -8, size: 39, color: visual.color, weight: "bold", stroke: "#080a0b", strokeWidth: 1 });
-  addGlyph(group, { char: "═", x: 0, y: 12, size: 32, color: "#a9b5b9", alpha: 0.8 });
+  const spriteByType: Partial<Record<LogisticsBuildingType, string>> = {
+    woodcutter: "medievalStructure_18", quarry: "medievalStructure_09", "iron-mine": "medievalStructure_09",
+    "pitch-worker": "medievalStructure_10", hunter: "medievalStructure_18",
+    bakery: "medievalStructure_03", brewery: "medievalStructure_03", blacksmith: "medievalStructure_10",
+    tanner: "medievalStructure_10", armourer: "medievalStructure_10", market: "medievalStructure_22"
+  };
+  const spriteId = spriteByType[type];
+  if (spriteId) addKenneySprite(group, spriteId, 0, -8, { cellSize: 4.8, material: "building", height: 0.3 });
+  else {
+    addGlyph(group, { char: visual.glyph, x: 0, y: -8, size: 39, color: visual.color, weight: "bold", stroke: "#080a0b", strokeWidth: 1 });
+    addGlyph(group, { char: "═", x: 0, y: 12, size: 32, color: "#a9b5b9", alpha: 0.8 });
+  }
   addWord(group, visual.name.toLocaleUpperCase("pl-PL").slice(0, 13), 0, 34, 7, visual.color, 0.84);
   group.position.set(x, y);
   return entity(group, `${type}-${index}`, visual.name, "building", "Pracownicy wykonują cykl produkcyjny i pieszo dostarczają towary do właściwego magazynu.", visual.role, x, y, 100);
 }
+
+[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

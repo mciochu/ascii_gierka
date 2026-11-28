@@ -148,7 +148,7 @@ test("dwuklik wybiera oddziały tego samego typu tylko wewnątrz viewportu", () 
 test("tryb budowania pokazuje zielony lub czerwony podgląd pola przed postawieniem budowli", () => {
   assert.match(main, /function canPlaceBuildPreview\(/);
   assert.match(main, /function updateBuildPreview\(/);
-  assert.match(main, /const color = valid \? "#65e08b" : "#ef6862"/);
+  assert.match(main, /const color = valid \? "#9aa36d" : "#96372f"/);
   assert.match(main, /canvas\.addEventListener\("pointermove", \(event: PointerEvent\) => \{[\s\S]*?updateBuildPreview\(event\.clientX, event\.clientY\)/);
   assert.match(main, /buildPreviewLayer\.visible = mode === "build"/);
   assert.match(main, /const cost = TOWN_BUILD_COSTS\[type\]/);

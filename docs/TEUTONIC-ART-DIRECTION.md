@@ -1,75 +1,40 @@
-# DOMINIUM — Teutonic Order visual direction
+# DOMINIUM — visual redesign: Teutonic frontier, c. 1320
 
-## Art identity
+## Art direction
 
-The former generic medieval / desert-Crusader palette is replaced by a northern-European medieval frontier associated with the Teutonic Order and the Polish–Teutonic borderlands. This is a visual direction, not a claim that every structure or unit is an exact archaeological reconstruction.
+A northern-European frontier town and fortress at the height of the medieval Teutonic state. The visual identity is deliberately grounded rather than fantasy: pale weathered limestone, rough fieldstone, deep brick red, steep slate roofs, dark timber, worn iron, aged parchment, forest greens and restrained gilt. The black cross on white cloth is a strong, readable Order identifier, not a decoration placed on every object.
 
-Core visual anchors:
-- White mantles and banners bearing a black cross for the Order, with restrained red heraldic edging.
-- Separate Polish heraldic treatment: red-and-white cloth and warm gold trim.
-- Enemy/raider treatment: weathered iron, leather, earth and muted ochre; no accidental Order cross.
-- Brick-red masonry, pale limestone, dark slate roofs, exposed timber, iron fittings and aged gold.
-- Temperate forests, meadows, muddy tracks, rivers, rocky ridges, cultivated fields and marshes instead of a bright Arabian/desert visual language.
-- Black world background remains intentional; local colour, glyph density and lighting provide the sense of depth.
+## Rendering rules
 
-## Rendering constraints
+- The world remains a live Unicode-glyph renderer through the existing PixiJS/Effulgence GPU instancing path. No PNG, bitmap texture, sprite image, SVG illustration or Canvas artwork is introduced.
+- Architecture and people are layered glyph compositions with offset shadows, material colours, highlights, depth values and small hand-authored silhouette details.
+- The map remains black/dark at its outer void, with irregular temperate forest, marsh, river, meadow, cultivated plots, paths and rocky ridges inside the playable diamond.
+- Art is presentation-only. Simulation, movement, collision, economy, entity IDs, saved state and controls do not depend on visual patterns.
+- Zoom LOD must keep close, standard and strategic representations readable; tactical group counts remain legible.
 
-- All game-world visuals are individually positioned Unicode glyphs rendered through the existing PixiJS/Effulgence pipeline.
-- No runtime PNG, sprite sheet, Canvas image, SVG illustration, 3D model or texture artwork.
-- Asset miniatures use irregularly offset glyph cells rather than fixed terminal rows. The compact source patterns are only construction guides; the renderer applies organic positional drift.
-- The logic grid, collision, economy, entity IDs, simulation state, saves and controls are independent of art.
-- Close/standard/strategic LOD must remain supported. Tactical count markers and selection feedback stay legible.
+## Asset library
 
-## Asset families
+The main catalogue is `src/engine/teutonic-art.ts`. It contains more than 60 distinct architectural, production, military, civilian, transport, nature and siege compositions. Major families include:
 
-`src/engine/teutonic-art.ts` is the central visual catalogue. Current families include:
+- Fortification: keep, watchtower, wall, gate, barbican, palisade, drawbridge and bridge.
+- Town and religion: hovels, manor, chapel, church, cathedral, monastery, inn, infirmary, well and shrine.
+- Industry and food: woodcutter, hunter, quarry, mine, pitch works, orchards, grain and hop fields, dairy farm, mill, bakery, brewery, smithy, bowyer, poleturner, tannery, armourer, ox tether and market.
+- Siege and transport: trebuchet, mangonel, battering ram, siege tower, wagon and ox cart.
+- People and army: knight, sergeant, spearman, crossbowman, archer, cavalry, villager, priest, lord, banner bearer, scout, engineer, miner and messenger.
 
-### Fortifications and military buildings
-- Keep / donjon, watchtower, curtain wall, gate, barracks, stables and armoury.
-- Stone courses, crenellations, dark rooflines, timber gates and white Order pennants.
-- Future assets to add: gatehouse, barbican, moat bridge, siege tower, mangonel, trebuchet, palisade, engineer camp, dog kennel, oil cauldron and fortified monastery.
+Every catalogue pattern renders through independently positioned glyphs. Composition metrics and a regression suite check the library breadth, minimum detail, valid placement and faction distinction.
 
-### Town and religion
-- Hovels, chapel, parish church, cathedral, inn, garden and gallows.
-- Steep timber roofs, pale masonry, narrow dark openings, bell towers and crosses.
-- Future assets: bakehouse, well, bathhouse, hospital, market square, tavern signs, cemetery, monastery cloister and scriptorium.
+## Faction heraldry
 
-### Industry and agriculture
-- Woodcutter, quarry, mine, pitch works, orchard, fields, mill, bakery, brewery, smithy, tannery and market.
-- Roofs and frames use the same material palette as the castle; workshops should read as working places rather than abstract icons.
-- Future assets: charcoal burner, lime kiln, saw pit, cooper, weaver, ropewalk, stable yard, windmill sails and granary hoist.
+- Teutonic Order: aged white cloth, black cross, restrained oxblood edging and cool weathered iron.
+- Polish forces: red/white cloth with horse-device treatment and warm gold trim; no black Order cross.
+- Raiders and hostile forces: muted ochre, brown leather, dark iron and oxblood; no Order cross.
+- Neutral townsfolk: parchment, wool, flax, leather and timber tones.
 
-### People and army
-- Knight, sergeant, spearman, crossbowman, archer, cavalry, villager, priest and lord.
-- Distinct silhouettes for helmet, mail/plate, shield, bow/crossbow, spear and mounted troops.
-- Order, Polish and enemy heraldry is passed as a faction palette; simulation classes and recruitment costs are unchanged.
-- Future assets: Teutonic grand master, banner bearer, priest, scout, engineer, miner, wagoner, peasant woman, ox cart, wounded soldier, siege crew and messenger.
+## Interface materials
 
-## Colour tokens
+The HUD is built as dark iron/wooden framing with brass fittings, carved shield-like category controls and parchment document panels. Oxblood marks danger; muted moss indicates healthy state. Electric cyan, neon green, sci-fi styling and bright blue selection accents are excluded.
 
-| Material | Colour intent |
-|---|---|
-| Limestone | pale grey-beige highlights |
-| Fieldstone | muted grey-green |
-| Brick | dark red / burnt terracotta |
-| Roof | slate charcoal |
-| Timber | warm brown |
-| Iron | cool weathered grey |
-| Order cloth | aged white with black cross and restrained red trim |
-| Polish cloth | red and white with gold accents |
-| Vegetation | deep temperate greens and olive |
-| Ground | muted soil, grass and ochre |
-| UI accent | aged gold and oxblood red |
+## QA
 
-## UI
-
-The interface uses the same visual language as the map: near-black iron panels, warm stone text, aged-gold active states and restrained oxblood warnings. Avoid electric cyan, neon green, sci-fi borders, glossy gradients and futuristic iconography.
-
-## Validation checklist
-
-1. All asset IDs resolve to a glyph composition.
-2. Faction variants never leak the wrong heraldry.
-3. No new image or sprite runtime dependency is introduced.
-4. TypeScript, unit tests and production build pass.
-5. Existing save files, entity IDs, simulation rules and input controls remain unchanged.
-6. Visual QA at wide desktop and narrow mobile widths; check close, standard and strategic zoom.
+Run `npm run verify` and `git diff --check`. Confirm that all catalogue assets render, faction insignia do not leak across sides, all 119 existing tests remain green, mobile HUD stays within the 100%-height layout, and no simulation/save identifiers have changed.

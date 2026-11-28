@@ -47,6 +47,11 @@ export function setFortificationGate(grid: WorldGrid, entity: GameEntity, open: 
   entity.gateOpen = open;
   tile.walkable = open && (entity.underlyingWalkable ?? true);
   tile.buildable = false;
+  if (entity.group) {
+    for (const child of entity.group.children) {
+      if (child.label === "gate-open-left" || child.label === "gate-open-right") child.alpha = open ? 0.98 : 0;
+    }
+  }
   return true;
 }
 

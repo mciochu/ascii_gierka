@@ -29,6 +29,12 @@ test("world uses the Teutonic glyph asset pipeline instead of generic sprite ass
   assert.ok(world.includes('drawTeutonicAsset(group, unitArt[role] ?? "sergeant"'));
   assert.ok(world.includes('const townArt: Record<TownBuildingType, TeutonicAssetKind>'));
   assert.ok(world.includes('const productionArt: Record<LogisticsBuildingType, TeutonicAssetKind>'));
+  assert.ok(world.includes('drawTeutonicAsset(group, "keep"'));
+  assert.ok(world.includes('drawTeutonicAsset(group, "barracks"'));
+  assert.ok(world.includes('drawTeutonicAsset(group, "mill"'));
+  assert.ok(world.includes('drawTeutonicAsset(group, "granary"'));
+  assert.ok(world.includes('isGate ? "gate" : "wall"'));
+  assert.ok(world.includes('lod: "standard"'));
   assert.ok(art.includes('char: "✠"'));
   assert.ok(!world.includes("addKenneySprite"));
 });

@@ -3,7 +3,7 @@ import { addGlyph, addWord, GlyphDisplay, type GlyphLodSet } from "./glyph";
 import { drawTeutonicAsset, type TeutonicAssetKind } from "./teutonic-art";
 import { HUNTING_NODES, type ProductionType, type StorageType } from "./logistics";
 import { applyFortificationToTile, canPlaceFortification, type FortificationKind } from "./fortifications";
-import { createWorldGrid, GRID_PIVOT, worldPositionForCell, type WorldGrid, type TerrainKind } from "./grid";
+import { createWorldGrid, createTerrainOverview, GRID_PIVOT, worldPositionForCell, type WorldGrid, type TerrainKind } from "./grid";
 
 export type EntityKind = "building" | "unit";
 export type Faction = "player" | "enemy" | "neutral";
@@ -92,7 +92,8 @@ function addTree(parent: Container, x: number, y: number, scale: number, seed: n
       size: (15 + rand() * 15) * scale,
       color: greens[Math.floor(rand() * greens.length)] ?? "#547c50",
       alpha: 0.78 + rand() * 0.2,
-      rotation: (rand() - 0.5) * 0.35
+      rotation: (rand() - 0.5) * 0.35,
+      lod: ["standard", "close"]
     });
   }
   if (insideWorldDiamond(x, y + 15 * scale)) addGlyph(parent, {
@@ -101,7 +102,8 @@ function addTree(parent: Container, x: number, y: number, scale: number, seed: n
     y: y + 15 * scale,
     size: 12 * scale,
     color: "#63462f",
-    alpha: 0.8
+    alpha: 0.8,
+    lod: ["standard", "close"]
   });
   if (rand() > 0.48) {
     const dotX = x + (rand() - 0.5) * 35 * scale;
@@ -112,7 +114,8 @@ function addTree(parent: Container, x: number, y: number, scale: number, seed: n
       y: dotY,
       size: 10 * scale,
       color: "#91a05d",
-      alpha: 0.85
+      alpha: 0.85,
+      lod: ["standard", "close"]
     });
   }
 }
@@ -137,7 +140,8 @@ function addForest(parent: Container, centerX: number, centerY: number, radiusX:
       y,
       size: 8 + rand() * 9,
       color: "#536a43",
-      alpha: 0.6
+      alpha: 0.6,
+      lod: ["standard", "close"]
     });
   }
 }
@@ -159,7 +163,8 @@ function addQuadraticPath(parent: Container, start: { x: number; y: number }, co
       y: pointY,
       size: 10 + rand() * 8,
       color: rand() > 0.5 ? "#3b3428" : "#514532",
-      alpha: 0.42 + rand() * 0.25
+      alpha: 0.42 + rand() * 0.25,
+      lod: ["standard", "close"]
     });
   }
 }
@@ -202,7 +207,8 @@ function addRiver(parent: Container): void {
       color: rand() > 0.55 ? "#355d70" : "#477c91",
       alpha: 0.42 + rand() * 0.2,
       rotation: -0.22,
-      material: "terrain", height: 0.02, animated: true, entityId: "terrain:water"
+      material: "terrain", height: 0.02, animated: true, entityId: "terrain:water",
+      lod: ["standard", "close"]
     });
   }
   for (let i = 0; i < 58; i += 1) {
@@ -217,7 +223,8 @@ function addRiver(parent: Container): void {
       size: 7 + rand() * 9,
       color: "#7094a0",
       alpha: 0.55,
-      material: "terrain", height: 0.02, animated: true, entityId: "terrain:water"
+      material: "terrain", height: 0.02, animated: true, entityId: "terrain:water",
+      lod: ["standard", "close"]
     });
   }
 }
@@ -242,7 +249,8 @@ function addTerrain(layers: WorldLayers): void {
       size,
       color: sands[Math.floor(rand() * sands.length)] ?? "#b99a70",
       alpha: 0.25 + rand() * 0.43,
-      rotation: (rand() - 0.5) * 1.2
+      rotation: (rand() - 0.5) * 1.2,
+      lod: ["standard", "close"]
     });
   }
 
@@ -267,7 +275,8 @@ function addTerrain(layers: WorldLayers): void {
       size: 10 + rand() * 20,
       color: rand() > 0.5 ? "#625d4f" : "#8a8b7d",
       alpha: 0.35 + rand() * 0.35,
-      rotation: rand() * 0.6
+      rotation: rand() * 0.6,
+      lod: ["standard", "close"]
     });
   }
 
@@ -283,7 +292,8 @@ function addTerrain(layers: WorldLayers): void {
         y,
         size: 14 + rand() * 5,
         color: "#4a3b28",
-        alpha: 0.42
+        alpha: 0.42,
+        lod: ["standard", "close"]
       });
     }
   }
@@ -321,7 +331,8 @@ function addGridTerrain(layers: WorldLayers, grid: WorldGrid): { glyph: GlyphDis
       height: Math.max(0, Math.min(1, tile.elevation / 4)),
       normal: tile.terrain === "cliff" ? [0.0, 0.82, 0.57] : tile.terrain === "hill" ? [0.18, 0.34, 0.92] : [0.0, 0.0, 1.0],
       entityId: "terrain:" + tile.terrain,
-      animated: tile.terrain === "water" || tile.terrain === "oasis" || tile.terrain === "tar"
+      animated: tile.terrain === "water" || tile.terrain === "oasis" || tile.terrain === "tar",
+      lod: ["standard", "close"]
     });
     elevationMarks.push({ glyph, rise });
     if (tile.terrain === "cliff") {
@@ -335,10 +346,41 @@ function addGridTerrain(layers: WorldLayers, grid: WorldGrid): { glyph: GlyphDis
         material: "terrain",
         height: Math.max(0, Math.min(1, tile.elevation / 4)) * 0.75,
         normal: [0.0, 0.78, 0.62],
-        entityId: "terrain:cliff"
+        entityId: "terrain:cliff",
+        lod: ["standard", "close"]
       });
       elevationMarks.push({ glyph: lowerGlyph, rise });
     }
+  }
+
+  const overviewSymbols: Record<TerrainKind, { char: string; color: string; alpha: number }> = {
+    sand: { char: "░", color: "#c7b78f", alpha: 0.82 },
+    oasis: { char: "❧", color: "#91a36c", alpha: 0.82 },
+    forest: { char: "♣", color: "#91a36c", alpha: 0.88 },
+    water: { char: "≈", color: "#75a9c1", alpha: 0.92 },
+    hill: { char: "﹏", color: "#a18c65", alpha: 0.78 },
+    cliff: { char: "▲", color: "#b0b0a5", alpha: 0.9 },
+    stone: { char: "◈", color: "#c2c2b5", alpha: 0.9 },
+    iron: { char: "◆", color: "#d28a65", alpha: 0.92 },
+    tar: { char: "◉", color: "#9b8a80", alpha: 0.9 },
+    moat: { char: "≈", color: "#75a9c1", alpha: 0.92 }
+  };
+  for (const cell of createTerrainOverview(grid, 6)) {
+    const mark = overviewSymbols[cell.terrain];
+    addGlyph(layers.terrain, {
+      char: mark.char,
+      x: cell.x,
+      y: cell.y,
+      size: 38,
+      color: mark.color,
+      alpha: mark.alpha * (cell.terrain === "sand" ? 1 : Math.min(1, 0.68 + cell.coverage)),
+      material: "overview",
+      height: Math.max(0, Math.min(1, cell.elevation / 4)) * 0.5,
+      emissive: 0.44,
+      minScreenCells: [1.8, 1.8],
+      lod: "strategic",
+      entityId: "terrain-overview:" + cell.terrain
+    });
   }
   return elevationMarks;
 }
@@ -395,8 +437,8 @@ function makeUnit(
   const role = unitClass ?? (variant === 1 ? "archers" : variant === 2 ? "cavalry" : variant === 3 ? "raiders" : "pikemen");
   const tacticalGlyph = variant === 1 ? ")" : variant === 2 ? "m" : variant === 3 ? "*" : "█";
   const classGlyph: Record<string, string> = {
-    archers: ")", crossbowmen: "}", pikemen: "█", swordsmen: "⚔",
-    cavalry: "m", raiders: "*", lord: "♛"
+    archers: "⌁", crossbowmen: "╳", pikemen: "⚔", swordsmen: "⚔",
+    cavalry: "♞", raiders: "✦", lord: "♛"
   };
   const palette = team === "enemy" || variant === 3
     ? "#a63832"
@@ -416,13 +458,17 @@ function makeUnit(
     });
   });
   addGlyph(group, {
-    char: classGlyph[role] ?? tacticalGlyph, x: 0, y: 0, size: 24, color: palette, weight: "bold",
-    alpha: 0.98, material: "unit", height: 0.24, lod: "strategic", minScreenCells: [1, 2]
+    char: classGlyph[role] ?? tacticalGlyph, x: 0, y: 0, size: 34, color: palette, weight: "bold",
+    alpha: 1, material: "unit", height: 0.24, lod: "strategic", minScreenCells: [2, 2]
   });
   addGlyph(group, {
-    char: "[x" + count + "]", x: 18, y: -17, size: 14, color: palette, weight: "bold",
-    alpha: 0.98, material: "unit", height: 0.24, lod: "strategic", minScreenCells: [1, 1]
+    char: "×", x: 46, y: -16, size: 18, color: palette, weight: "bold",
+    alpha: 1, material: "unit", height: 0.24, lod: "strategic", minScreenCells: [1, 1]
   });
+  Array.from(String(count)).forEach((digit, index) => addGlyph(group, {
+    char: digit, x: 74 + index * 28, y: -16, size: 18, color: palette, weight: "bold",
+    alpha: 1, material: "unit", height: 0.24, lod: "strategic", minScreenCells: [1, 1]
+  }));
   addGlyph(group, {
     char: "|", x: 23, y: -34, size: 23, color: "#a8794d",
     material: "unit", lod: "standard"
@@ -448,21 +494,22 @@ function setGlyphTreeLod(node: Container, lod: GlyphLodSet): void {
 }
 
 function strategicBuildingGlyph(id: string): { char: string; color: string } {
-  if (id === "keep") return { char: "K", color: "#d1b16e" };
-  if (id === "barracks") return { char: "B", color: "#d1d0c3" };
-  if (id === "mill") return { char: "M", color: "#d7bd85" };
-  if (id === "storehouse" || id.startsWith("granary")) return { char: "S", color: "#cdbb8b" };
-  if (id.startsWith("stockpile")) return { char: "▣", color: "#b4b8aa" };
-  if (id.startsWith("armory")) return { char: "A", color: "#c6a9a0" };
-  if (id.startsWith("watchtower")) return { char: "T", color: "#d1d0c3" };
-  if (id.startsWith("market")) return { char: "$", color: "#d1b16e" };
-  if (id.startsWith("quarry")) return { char: "Q", color: "#b8b8b0" };
-  if (id.startsWith("woodcutter") || id.startsWith("hunter")) return { char: "W", color: "#87966b" };
-  if (id.startsWith("iron-mine")) return { char: "I", color: "#aebac7" };
-  if (id.startsWith("pitch")) return { char: "P", color: "#b6a2c9" };
-  if (id.startsWith("hovel")) return { char: "H", color: "#cda77f" };
-  if (id.startsWith("chapel") || id.startsWith("church") || id.startsWith("cathedral")) return { char: "†", color: "#e3d6b1" };
-  return { char: "#", color: "#c5c6c1" };
+  if (id === "keep") return { char: "♜", color: "#e1bd79" };
+  if (id === "barracks") return { char: "⚔", color: "#d6d8d1" };
+  if (id === "mill") return { char: "✣", color: "#dfc58e" };
+  if (id === "storehouse" || id.startsWith("granary")) return { char: "▤", color: "#d7c49b" };
+  if (id.startsWith("stockpile")) return { char: "▥", color: "#c5c9bd" };
+  if (id.startsWith("armory")) return { char: "⚒", color: "#c6cbd0" };
+  if (id.startsWith("watchtower")) return { char: "†", color: "#d1d0c3" };
+  if (id.startsWith("market")) return { char: "⚖", color: "#e0bd79" };
+  if (id.startsWith("quarry")) return { char: "◈", color: "#c6c8c0" };
+  if (id.startsWith("woodcutter") || id.startsWith("hunter")) return { char: "♧", color: "#9eae7b" };
+  if (id.startsWith("iron-mine")) return { char: "◆", color: "#d68b5c" };
+  if (id.startsWith("pitch")) return { char: "◉", color: "#b6a2c9" };
+  if (id.startsWith("hovel")) return { char: "⌂", color: "#d3a77a" };
+  if (id.startsWith("chapel") || id.startsWith("church") || id.startsWith("cathedral")) return { char: "✝", color: "#e3d6b1" };
+  if (id.startsWith("wheat") || id.startsWith("hop") || id.startsWith("dairy")) return { char: "✿", color: "#d7c96d" };
+  return { char: "◇", color: "#c5c6c1" };
 }
 
 function entity(
@@ -481,15 +528,15 @@ function entity(
 ): GameEntity {
   group.label = id;
   if (kind === "building") {
-    // Existing architecture remains the shared standard/close silhouette;
-    // a single representative mark replaces its detail at strategic zoom.
+    // Detailed architecture is replaced by a screen-stable heraldic/category mark
+    // at strategic zoom, rather than a tiny alphabetic building abbreviation.
     setGlyphTreeLod(group, ["standard", "close"]);
     const marker = strategicBuildingGlyph(id);
     addGlyph(group, {
-      char: marker.char, x: 0, y: -52, size: 38,
-      color: marker.color, weight: "bold", alpha: 0.98,
-      material: "building", height: 0.62, lod: "strategic",
-      minScreenCells: [1, 1], entityId: "strategic-building:" + id
+      char: marker.char, x: 0, y: -38, size: 44,
+      color: marker.color, weight: "bold", alpha: 1,
+      material: "building", height: 0.72, lod: "strategic",
+      minScreenCells: [2, 2], entityId: "strategic-building:" + id
     });
   }
   return {

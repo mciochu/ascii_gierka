@@ -998,3 +998,332 @@ const U: Record<string, Pattern> = {
       "     |w#c#w|        ",
       "      |ccc|         ",
       "   +==|www|==+      ",
+      "   |www#†#www|      ",
+      "   +#########+      ",
+      "      |www|         ",
+      "      |w|w|         "
+    ]
+  },
+  lord: {
+    category: "unit",
+    rows: [
+      "        ggggg       ",
+      "       g+g+g+g      ",
+      "       |www|        ",
+      "      /wwwww\\       ",
+      "     |w#o#w|        ",
+      "      |###|         ",
+      "   +==|www|==+      ",
+      "   |www#†#www|      ",
+      "   |wwwwwwwww|      ",
+      "   +#########+      ",
+      "      |www|         ",
+      "      |w|w|         ",
+      "       t t          "
+    ]
+  },
+  "banner-bearer": {
+    category: "unit",
+    rows: [
+      "        ⚑          ",
+      "        |          ",
+      "        |          ",
+      "       +hhh+       ",
+      "      /hhhhh\\      ",
+      "     |h#o#h|       ",
+      "      |###|        ",
+      "   +==|www|==+     ",
+      "   |www#†#www|     ",
+      "   +#########+     ",
+      "      |t|t|        "
+    ]
+  },
+  scout: {
+    category: "unit",
+    rows: [
+      "       sssss       ",
+      "      /sssss\\      ",
+      "     |s#o#s|       ",
+      "      |###|        ",
+      "   +==|ttt|==+     ",
+      "   |ttt#t#ttt|     ",
+      "   +#########+     ",
+      "      |t|t|        ",
+      "       t t         "
+    ]
+  },
+  engineer: {
+    category: "unit",
+    rows: [
+      "       hhh         ",
+      "      /hhh\\        ",
+      "     |h#o#h|       ",
+      "      |###|        ",
+      "   +==|ttt|==+     ",
+      "   |ttt#h#ttt|     ",
+      "   +#########+     ",
+      "      |t|t|        ",
+      "       t t         "
+    ]
+  },
+  miner: {
+    category: "unit",
+    rows: [
+      "       sss         ",
+      "      /sss\\        ",
+      "     |s#o#s|       ",
+      "      |###|        ",
+      "   +==|ttt|==+     ",
+      "   |ttt#h#ttt|     ",
+      "   +#########+     ",
+      "      |t|t|        ",
+      "       t t         "
+    ]
+  },
+  messenger: {
+    category: "unit",
+    rows: [
+      "       sss         ",
+      "      /sss\\        ",
+      "     |s#o#s|       ",
+      "      |###|        ",
+      "   +==|www|==+     ",
+      "   |www#†#www|     ",
+      "   +#########+     ",
+      "      |t|t|        ",
+      "       t t         "
+    ]
+  }
+};
+
+const HERALDIC = new Set<TeutonicAssetKind>([
+  "keep", "watchtower", "gate", "barbican", "barracks", "armory",
+  "manor", "chapel", "church", "cathedral", "monastery", "shrine"
+]);
+const SMOKE = new Set<TeutonicAssetKind>(["bakery", "brewery", "smithy", "pitch"]);
+const PALETTES: Record<string, string> = {
+  ...P,
+  w: C.white,
+  R: C.red,
+  b: C.black,
+  g: C.gold
+};
+
+function familyPalette(faction: TeutonicAssetOptions["faction"]): { cloth: string; shadow: string; trim: string; metal: string } {
+  switch (faction) {
+    case "polish": return POLISH;
+    case "enemy": return ENEMY;
+    case "neutral": return NEUTRAL;
+    default: return ORDER;
+  }
+}
+
+/**
+ * High-density medieval miniatures drawn from independently positioned glyphs.
+ * Patterns are an authoring shorthand only: every cell enters the existing GPU
+ * glyph renderer, never a bitmap, sprite sheet or Canvas image.
+ */
+export function drawTeutonicAsset(
+  parent: Container,
+  kind: TeutonicAssetKind,
+  x: number,
+  y: number,
+  options: TeutonicAssetOptions = {}
+): TeutonicAssetStats {
+  const pattern = U[kind] ?? B[kind];
+  if (!pattern) throw new RangeError("Unknown Teutonic asset: " + kind);
+  const scale = clamp(options.scale ?? 1, 0.35, 2.4);
+  const rows = pattern.rows;
+  const chars = rows.map(row => Array.from(row));
+  const width = Math.max(...chars.map(row => row.length));
+  const height = rows.length;
+  const cell = 5.2 * scale;
+  const stepX = cell * 0.82;
+  const stepY = cell * 0.84;
+  const faction = options.faction ?? "order";
+  const heraldry = options.heraldry ?? HERALDIC.has(kind);
+  const colors = familyPalette(faction);
+  const palette = { ...PALETTES, ...(pattern.palette ?? {}) };
+  let glyphCount = 0;
+  const centerCol = (width - 1) / 2;
+  const centerRow = (height - 1) / 2;
+
+  // Low offset shadow, then the material body: this keeps the little buildings
+  // legible against a black map without turning them into a flat icon.
+  if (options.shadow !== false) {
+    for (let row = 0; row < height; row += 1) {
+      for (let col = 0; col < (chars[row]?.length ?? 0); col += 1) {
+        const char = chars[row]?.[col] ?? " ";
+        if (char === " ") continue;
+        addGlyph(parent, {
+          char,
+          x: x + (col - centerCol) * stepX + cell * 0.12,
+          y: y + (row - centerRow) * stepY + cell * 0.18,
+          size: cell * 1.02,
+          color: C.shadow,
+          alpha: 0.5,
+          weight: "bold",
+          material: pattern.category === "unit" ? "unit" : "building",
+          height: 0.08,
+          ...(options.lod ? { lod: options.lod } : {})
+        });
+        glyphCount += 1;
+      }
+    }
+  }
+
+  for (let row = 0; row < height; row += 1) {
+    const line = chars[row] ?? [];
+    for (let col = 0; col < line.length; col += 1) {
+      const char = line[col] ?? " ";
+      if (char === " ") continue;
+      const isUnit = pattern.category === "unit";
+      const factionColor =
+        char === "w" ? colors.cloth :
+        char === "R" ? colors.trim :
+        char === "b" ? colors.shadow :
+        char === "h" && isUnit ? colors.metal :
+        palette[char] ?? C.stone;
+      const frontEdge = col < Math.max(1, width * 0.36);
+      const sideShade = col > width * 0.68 ? 0.84 : 1;
+      const jitterX = Math.sin(row * 2.31 + col * 1.73) * cell * 0.035;
+      const jitterY = Math.cos(row * 1.61 + col * 2.19) * cell * 0.03;
+      const sizeNoise = 0.96 + ((row * 13 + col * 7) % 5) * 0.012;
+      const isMasonry = char === "#" || char === "█" || char === "▓" || char === "▒";
+      const isHighlight = char === "+" || char === "░" || char === "g" || char === "h";
+      const isFire = char === "*";
+      addGlyph(parent, {
+        char,
+        x: x + (col - centerCol) * stepX + jitterX,
+        y: y + (row - centerRow) * stepY + jitterY,
+        size: cell * sizeNoise * (isHighlight ? 0.94 : 1.04),
+        color: sideShade < 1 ? shade(factionColor, sideShade) : factionColor,
+        alpha: isFire ? 0.96 : isMasonry ? 0.97 : 0.92,
+        weight: "bold",
+        material: isUnit ? "unit" : "building",
+        height: clamp(0.16 + (1 - row / Math.max(1, height - 1)) * 0.48, 0.12, 0.68),
+        normal: isMasonry ? (frontEdge ? [-0.18, 0.14, 0.97] : [0.2, 0.12, 0.96]) : [0, 0.08, 1],
+        ...(isFire ? { emissive: 0.8, emissiveColor: C.fire, animated: true } : {}),
+        ...(options.entityId !== undefined ? { entityId: options.entityId } : {}),
+        ...(options.lod ? { lod: options.lod } : {})
+      });
+      glyphCount += 1;
+    }
+  }
+
+  if (heraldry) {
+    drawPennant(parent, x + width * stepX * 0.36, y - height * stepY * 0.42, scale, faction, options);
+    glyphCount += faction === "enemy" ? 2 : 3;
+  }
+
+  if (pattern.category === "unit") {
+    const shieldX = x - width * stepX * 0.28;
+    const shieldY = y + height * stepY * 0.09;
+    addGlyph(parent, {
+      char: "▣", x: shieldX, y: shieldY, size: 8.3 * scale,
+      color: faction === "enemy" ? ENEMY.trim : faction === "polish" ? POLISH.trim : C.white,
+      weight: "bold", material: "unit", height: 0.38, alpha: 0.98,
+      ...(options.lod ? { lod: options.lod } : {})
+    });
+    if (faction === "order") {
+      addGlyph(parent, {
+        char: "✠", x: shieldX, y: shieldY, size: 5.2 * scale,
+        color: C.black, weight: "bold", material: "unit", height: 0.4,
+        ...(options.lod ? { lod: options.lod } : {})
+      });
+    } else if (faction === "polish") {
+      addGlyph(parent, {
+        char: "♞", x: shieldX, y: shieldY, size: 4.8 * scale,
+        color: C.white, weight: "bold", material: "unit", height: 0.4,
+        ...(options.lod ? { lod: options.lod } : {})
+      });
+    }
+    glyphCount += faction === "enemy" ? 1 : 2;
+  }
+
+  if (SMOKE.has(kind)) {
+    const smokeX = x + width * stepX * 0.22;
+    const smokeY = y - height * stepY * 0.42;
+    for (let puff = 0; puff < 3; puff += 1) {
+      addGlyph(parent, {
+        char: puff === 1 ? "~" : "·",
+        x: smokeX + Math.sin(puff * 1.7) * cell * 0.38,
+        y: smokeY - puff * cell * 0.68,
+        size: cell * (0.66 - puff * 0.08),
+        color: C.smoke,
+        alpha: 0.28 + puff * 0.05,
+        material: "vfx",
+        animated: true,
+        height: 0.06,
+        ...(options.lod ? { lod: options.lod } : {})
+      });
+      glyphCount += 1;
+    }
+  }
+
+  if (options.label) {
+    addWord(
+      parent,
+      options.label.toLocaleUpperCase("pl-PL"),
+      x,
+      y + height * stepY * 0.5 + 9 * scale,
+      6.2 * scale,
+      C.gold,
+      0.78
+    );
+    glyphCount += Array.from(options.label).length;
+  }
+
+  return { width, height, glyphs: glyphCount, category: pattern.category };
+}
+
+function drawPennant(
+  parent: Container,
+  x: number,
+  y: number,
+  scale: number,
+  faction: NonNullable<TeutonicAssetOptions["faction"]>,
+  options: TeutonicAssetOptions
+): void {
+  addGlyph(parent, {
+    char: "|", x, y: y + 10 * scale, size: 22 * scale,
+    color: C.timberLight, weight: "bold", material: "building",
+    ...(options.lod ? { lod: options.lod } : {})
+  });
+  const flagColor = faction === "enemy" ? ENEMY.trim : faction === "polish" ? POLISH.trim : C.white;
+  addGlyph(parent, {
+    char: "⚑", x: x + 5.8 * scale, y, size: 17 * scale,
+    color: flagColor, weight: "bold", material: "building",
+    ...(options.lod ? { lod: options.lod } : {})
+  });
+  if (faction === "order") {
+    addGlyph(parent, {
+      char: "✠", x: x + 5.8 * scale, y, size: 8 * scale,
+      color: C.black, weight: "bold", material: "building",
+      ...(options.lod ? { lod: options.lod } : {})
+    });
+  } else if (faction === "polish") {
+    addGlyph(parent, {
+      char: "♞", x: x + 5.8 * scale, y, size: 7 * scale,
+      color: C.white, weight: "bold", material: "building",
+      ...(options.lod ? { lod: options.lod } : {})
+    });
+  }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
+}
+
+function shade(hex: string, factor: number): string {
+  const raw = hex.replace("#", "");
+  const value = Number.parseInt(raw.length === 3 ? raw.split("").map(c => c + c).join("") : raw, 16);
+  if (!Number.isFinite(value)) return hex;
+  const r = Math.min(255, Math.round(((value >> 16) & 255) * factor));
+  const g = Math.min(255, Math.round(((value >> 8) & 255) * factor));
+  const b = Math.min(255, Math.round((value & 255) * factor));
+  return "#" + [r, g, b].map(channel => channel.toString(16).padStart(2, "0")).join("");
+}
+
+export const TEUTONIC_PALETTE = C;
+export const TEUTONIC_ASSET_KINDS = Object.freeze([...Object.keys(B), ...Object.keys(U)] as TeutonicAssetKind[]);

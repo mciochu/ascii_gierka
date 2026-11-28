@@ -75,8 +75,11 @@ test("oświetlenie i downsample używają wysokości, normalnych, ID oraz limitu
   assert.match(source, /edgeMag/);
   assert.match(source, /uEmissive/);
   assert.ok(source.includes("emissiveStrength > 1.0 || layer == 3"));
-  assert.ok(source.includes("else if (layer == 2) priority = 3"));
+  assert.ok(source.includes("else if (layer == 2 || layer == 4) priority = 3"));
   assert.ok(source.includes("else if (layer == 1 && buildingEdge) priority = 2"));
+  assert.ok(source.includes("vec3(1.05, 1.0, 0.86)"));
+  assert.ok(source.includes("winningLayer == 0 && !priorityFour"));
+  assert.ok((await readSource("../src/engine/glyph-batch.ts")).includes("overview: 4"));
   assert.match(source, /bestScore/);
   assert.match(source, /0\.8/);
   assert.match(source, /1\.2/);
@@ -128,12 +131,16 @@ test("shader używa wymiarów mikro-atlasu 96×256 i półbloków dla silnych kr
 test("oddziały zawierają trzy poziomy detalu i znaczniki taktyczne [xN]", async () => {
   const world = await readSource("../src/engine/world.ts");
   const batch = await readSource("../src/engine/glyph-batch.ts");
+  assert.ok(world.includes('material: "overview"'));
+  assert.ok(world.includes('sand: { char: "░", color: "#c7b78f", alpha: 0.82 }'));
+  assert.ok(batch.includes('overview: 4'));
   assert.ok(world.includes('lod: "close"'));
   assert.ok(world.includes('lod: "standard"'));
   assert.ok(world.includes('lod: "strategic"'));
-  assert.ok(world.includes('char: "[x" + count + "]"'));
-  assert.ok(world.includes('const tacticalGlyph = variant === 1 ? ")" : variant === 2 ? "m" : variant === 3 ? "*" : "█";'));
-  assert.ok(world.includes("minScreenCells: [1, 2]"));
+  assert.ok(world.includes('Array.from(String(count))'));
+  assert.ok(world.includes('minScreenCells: [2, 2]'));
+  assert.ok(world.includes('archers: "⌁", crossbowmen: "╳", pikemen: "⚔"'));
+  assert.ok(world.includes('minScreenCells: [1, 1]'));
   assert.ok(world.includes("minScreenCells: [1, 1]"));
   assert.ok(world.includes('setGlyphTreeLod(group, ["standard", "close"])'));
   assert.ok(world.includes('lod: "strategic"'));

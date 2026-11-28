@@ -1,4 +1,6 @@
-import { Container, Rectangle, Sprite, Texture } from "pixi.js";
+import { Container } from "pixi.js";
+
+export type GlyphMaterialKind = "terrain" | "building" | "unit" | "selection" | "vfx" | "utility";
 
 export interface GlyphSpec {
   char: string;
@@ -11,140 +13,71 @@ export interface GlyphSpec {
   weight?: "normal" | "bold";
   stroke?: string;
   strokeWidth?: number;
+  material?: GlyphMaterialKind;
+  height?: number;
+  emissive?: number;
+  emissiveColor?: string;
+  animated?: boolean;
+  normal?: readonly [number, number, number];
+  entityId?: string | number;
 }
 
-export const GLYPH_ATLAS_LAYOUT = Object.freeze({
-  cellWidth: 48,
-  cellHeight: 64,
-  columns: 16,
-  rows: 32
-});
-
-const FONT = '"JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace';
-const FONT_SIZE = 45;
-const DEFAULT_COLOR = "#a9b99a";
-const textureCache = new Map<string, Texture>();
-
-type GlyphAtlas = {
-  canvas: HTMLCanvasElement;
-  context: CanvasRenderingContext2D;
-  sourceTexture: Texture;
-  dirty: boolean;
-};
-
-let atlas: GlyphAtlas | null = null;
-
-function ensureAtlas(): GlyphAtlas {
-  if (atlas) return atlas;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = GLYPH_ATLAS_LAYOUT.cellWidth * GLYPH_ATLAS_LAYOUT.columns;
-  canvas.height = GLYPH_ATLAS_LAYOUT.cellHeight * GLYPH_ATLAS_LAYOUT.rows;
-  const context = canvas.getContext("2d", { alpha: true });
-  if (!context) throw new Error("Cannot create the shared DOMINIUM glyph atlas.");
-
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  const sourceTexture = Texture.from(canvas);
-  sourceTexture.source.scaleMode = "linear";
-
-  atlas = { canvas, context, sourceTexture, dirty: false };
-  return atlas;
-}
-
-function cacheKey(character: string, weight: "normal" | "bold"): string {
-  return weight + ":" + character;
-}
-
-function glyphTexture(character: string, weight: "normal" | "bold"): Texture {
-  const key = cacheKey(character, weight);
-  const existing = textureCache.get(key);
-  if (existing) return existing;
-
-  const state = ensureAtlas();
-  const index = textureCache.size;
-  const capacity = GLYPH_ATLAS_LAYOUT.columns * GLYPH_ATLAS_LAYOUT.rows;
-  if (index >= capacity) {
-    if (character !== "?") return glyphTexture("?", weight);
-    throw new Error("The shared DOMINIUM glyph atlas is full.");
-  }
-
-  const column = index % GLYPH_ATLAS_LAYOUT.columns;
-  const row = Math.floor(index / GLYPH_ATLAS_LAYOUT.columns);
-  const x = column * GLYPH_ATLAS_LAYOUT.cellWidth;
-  const y = row * GLYPH_ATLAS_LAYOUT.cellHeight;
-
-  state.context.clearRect(x, y, GLYPH_ATLAS_LAYOUT.cellWidth, GLYPH_ATLAS_LAYOUT.cellHeight);
-  state.context.fillStyle = "#ffffff";
-  state.context.textAlign = "center";
-  state.context.textBaseline = "middle";
-  state.context.font = (weight === "bold" ? "700 " : "500 ") + FONT_SIZE + "px " + FONT;
-  state.context.fillText(
-    character,
-    x + GLYPH_ATLAS_LAYOUT.cellWidth / 2,
-    y + GLYPH_ATLAS_LAYOUT.cellHeight / 2 + 1
-  );
-  state.dirty = true;
-
-  const frame = new Rectangle(x, y, GLYPH_ATLAS_LAYOUT.cellWidth, GLYPH_ATLAS_LAYOUT.cellHeight);
-  const texture = new Texture({
-    source: state.sourceTexture.source,
-    frame,
-    orig: new Rectangle(0, 0, GLYPH_ATLAS_LAYOUT.cellWidth, GLYPH_ATLAS_LAYOUT.cellHeight)
-  });
-  textureCache.set(key, texture);
-  return texture;
-}
-
-function colorToTint(color: string | undefined): number {
-  const value = (color ?? DEFAULT_COLOR).trim();
-  const normalized = value.startsWith("#") ? value.slice(1) : value;
-  const expanded = normalized.length === 3
-    ? normalized.split("").map((part) => part + part).join("")
-    : normalized;
-  const parsed = Number.parseInt(expanded, 16);
-  return Number.isFinite(parsed) ? parsed : 0xffffff;
-}
-
-function createSprite(
-  character: string,
-  weight: "normal" | "bold",
-  color: string,
-  size: number,
-  x: number,
-  y: number
-): Sprite {
-  const sprite = new Sprite(glyphTexture(character, weight));
-  sprite.anchor.set(0.5);
-  sprite.setSize(size * 0.72, size * 1.05);
-  sprite.position.set(x, y);
-  sprite.tint = colorToTint(color);
-  sprite.roundPixels = true;
-  return sprite;
+export interface GlyphInstanceRecord {
+  character: string;
+  offsetX: number;
+  offsetY: number;
+  size: number;
+  weight: "normal" | "bold";
+  color: string;
+  stroke?: string;
+  strokeWidth: number;
+  height: number;
+  emissive: number;
+  emissiveColor: string;
+  animated: boolean;
+  material: GlyphMaterialKind | null;
+  entityId: string | number | null;
+  normal: readonly [number, number, number];
 }
 
 /**
- * A lightweight display object backed by a shared glyph atlas.
+ * A scene-graph node containing glyph data only.
  *
- * Text is rasterized into the atlas once per distinct character and weight.
- * The scene then renders atlas-backed quads that PixiJS can batch by texture
- * source; it no longer creates a PixiJS Text object for every visible mark.
+ * It intentionally owns no PixiJS Text, Sprite, or per-glyph texture. The
+ * Effulgence renderer collects these records and submits them to GPU
+ * instanced-quad batches, grouped by world layer.
  */
 export class GlyphDisplay extends Container {
   private _text = "";
   private fillColor: string;
   private readonly fontSize: number;
   private readonly fontWeight: "normal" | "bold";
-  private readonly strokeColor: string | undefined;
+  private readonly strokeColor?: string;
   private readonly strokeWidth: number;
+  private readonly material: GlyphMaterialKind | null;
+  private readonly glyphHeight: number;
+  private readonly emissive: number;
+  private readonly emissiveColor: string;
+  private readonly animated: boolean;
+  private readonly normal: readonly [number, number, number];
+  private readonly explicitEntityId: string | number | null;
+  private _records: GlyphInstanceRecord[] = [];
   readonly style: { fill: string };
 
   constructor(parent: Container, spec: GlyphSpec) {
     super();
-    this.fillColor = spec.color ?? DEFAULT_COLOR;
-    this.fontSize = spec.size ?? 14;
+    this.fillColor = spec.color ?? "#a9b99a";
+    this.fontSize = Math.max(1, spec.size ?? 14);
     this.fontWeight = spec.weight ?? "normal";
     this.strokeColor = spec.stroke;
     this.strokeWidth = Math.max(0, spec.strokeWidth ?? 0);
+    this.material = spec.material ?? null;
+    this.glyphHeight = spec.height === undefined ? -1 : clamp01(spec.height);
+    this.emissive = Math.max(0, Number.isFinite(spec.emissive) ? spec.emissive! : 0);
+    this.emissiveColor = spec.emissiveColor ?? this.fillColor;
+    this.animated = spec.animated ?? false;
+    this.normal = spec.normal ?? [0, 0, 1];
+    this.explicitEntityId = spec.entityId ?? null;
 
     const self = this;
     this.style = Object.defineProperty({}, "fill", {
@@ -168,50 +101,60 @@ export class GlyphDisplay extends Container {
     const next = String(value ?? "");
     if (next === this._text) return;
     this._text = next;
-    this.rebuildGlyphs();
+    this.rebuildRecords();
+  }
+
+  get glyphRecords(): readonly GlyphInstanceRecord[] {
+    return this._records;
+  }
+
+  get fontSizeValue(): number {
+    return this.fontSize;
+  }
+
+  get fontWeightValue(): "normal" | "bold" {
+    return this.fontWeight;
+  }
+
+  get fillValue(): string {
+    return this.fillColor;
+  }
+
+  get materialValue(): GlyphMaterialKind | null {
+    return this.material;
   }
 
   setFill(color: string): void {
     this.fillColor = color;
-    for (const child of this.children) {
-      if (child instanceof Sprite && child.label !== "glyph-stroke") {
-        child.tint = colorToTint(color);
-      }
-    }
+    this.rebuildRecords();
   }
 
-  private rebuildGlyphs(): void {
-    const previous = this.removeChildren();
-    for (const child of previous) child.destroy({ texture: false });
-
+  private rebuildRecords(): void {
     const characters = splitGlyphText(this._text);
-    if (characters.length === 0) return;
-
     const advance = glyphAdvance(this.fontSize);
     const startX = -((characters.length - 1) * advance) / 2;
-    characters.forEach((character, index) => {
-      const x = startX + index * advance;
-
-      if (this.strokeColor && this.strokeWidth > 0) {
-        const offsets = [
-          [-1, 0], [1, 0], [0, -1], [0, 1],
-          [-0.7, -0.7], [0.7, -0.7], [-0.7, 0.7], [0.7, 0.7]
-        ];
-        for (const [dx, dy] of offsets) {
-          const outline = createSprite(
-            character, this.fontWeight, this.strokeColor, this.fontSize,
-            x + dx * this.strokeWidth, dy * this.strokeWidth
-          );
-          outline.label = "glyph-stroke";
-          this.addChild(outline);
-        }
-      }
-
-      this.addChild(createSprite(
-        character, this.fontWeight, this.fillColor, this.fontSize, x, 0
-      ));
-    });
+    this._records = characters.map((character, index) => ({
+      character,
+      offsetX: startX + index * advance,
+      offsetY: 0,
+      size: this.fontSize,
+      weight: this.fontWeight,
+      color: this.fillColor,
+      ...(this.strokeColor ? { stroke: this.strokeColor } : {}),
+      strokeWidth: this.strokeWidth,
+      height: this.glyphHeight,
+      emissive: this.emissive,
+      emissiveColor: this.emissiveColor,
+      animated: this.animated,
+      material: this.material,
+      entityId: this.explicitEntityId,
+      normal: this.normal
+    }));
   }
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
 }
 
 export function splitGlyphText(value: string): string[] {
@@ -222,18 +165,11 @@ export function glyphAdvance(fontSize: number): number {
   return Math.max(1, fontSize * 0.68);
 }
 
-/** Uploads all newly rasterized atlas cells once, just before a frame is drawn. */
-export function flushGlyphAtlas(): void {
-  if (!atlas?.dirty) return;
-  atlas.sourceTexture.source.update();
-  atlas.dirty = false;
-}
-
 export function addGlyph(parent: Container, spec: GlyphSpec): GlyphDisplay {
   return new GlyphDisplay(parent, spec);
 }
 
-/** Adds a word as independent atlas glyphs, allowing a hand-composed baseline. */
+/** Adds a word as independent glyph nodes, preserving the original custom baseline. */
 export function addWord(
   parent: Container,
   word: string,
@@ -257,20 +193,4 @@ export function addWord(
       weight: "bold"
     });
   });
-}
-
-export function glyphCacheStats(): number {
-  return textureCache.size;
-}
-
-export function glyphAtlasStats(): {
-  glyphCount: number;
-  capacity: number;
-  dirty: boolean;
-} {
-  return {
-    glyphCount: textureCache.size,
-    capacity: GLYPH_ATLAS_LAYOUT.columns * GLYPH_ATLAS_LAYOUT.rows,
-    dirty: atlas?.dirty ?? false
-  };
 }

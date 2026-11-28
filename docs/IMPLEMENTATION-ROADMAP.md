@@ -260,3 +260,48 @@ Zakres: sekcja 8 oraz końcowa integracja wszystkich systemów.
 - Testy obejmują pojemność atlasu, dzielenie znaków Unicode/emoji i skalowanie odstępów glifów.
 - TypeScript, komplet testów i produkcyjny build Vite muszą przejść przed publikacją.
 - Test wizualny w przeglądarce VPS nadal jest ograniczony brakiem `libatk-1.0.so.0`; wynik HTTP nie jest uznawany za test wyglądu ani płynności.
+
+
+## Rewizja architektury Effulgence — faza 3 (2026-11-28)
+
+**Status i ważna korekta dokumentacji**
+
+Ta faza zastępuje wcześniejszy tymczasowy renderer filtrów oraz wcześniejszy etap atlasowych sprite'ów. Opisy faz 1–2 powyżej zachowują historię zmian, ale nie opisują już aktualnej architektury. W aktualnej wersji nie ma osobnego `PixiJS Text` ani `Sprite` dla każdego glifu mapy.
+
+**Wdrożone elementy z docelowej specyfikacji**
+
+- `src/engine/glyph.ts` przechowuje wyłącznie rekordy glifów i transformacje. Nie tworzy tekstów, sprite'ów ani tekstur na pojedynczy znak.
+- `src/engine/glyph-batch.ts` rasteruje monochromatyczny atlas `16×32` o komórkach `48×64`, z 64 stałymi slotami specyfikacji. Dane glifów są pakowane do buforów instancji i wysyłane do GPU partiami per warstwa. Dodatkowe znaki Unicode i warianty pogrubione zajmują pozostałą pojemność atlasu; przepełnienie używa glifu zastępczego.
+- Pass 0 renderuje scenę do czterech osobnych załączników MRT: `RGBA8` Albedo, `RGBA16F` NormalHeight, `RGBA16F` Emissive oraz `RGBA8UI` EntityID.
+- Pass 1 odczytuje G-Buffer, stosuje ciemne niebieskie światło otoczenia, kierunkowy wektor światła, cieniowanie wysokości i bufor do 64 świateł punktowych z cullingiem oraz łączeniem bliskich źródeł. Na tę chwilę z gry dostarczane jest rzeczywiste źródło światła ogniska; pozostałe źródła z tabeli specyfikacji nie są jeszcze podłączone.
+- Pass 2 wykonuje próbkowanie komórek i detekcję krawędzi z kanałów wysokości, normalnych i ID obiektu. Wykrywanie animacji korzysta z flagi materiału zakodowanej w ID, nie z heurystyki koloru.
+- Pass 3 stosuje 16-stopniową rampę, glify krawędziowe, dithering Bayera, opcjonalne migotanie `8 Hz` dla oznaczonych materiałów oraz rozjaśnianie rdzenia HDR.
+- Pass 5 ma cztery poziomy downsample i cztery poziomy upsample Dual-Kawase z progiem `0.72` i miękkim kolanem `0.15`.
+- Pass 6 wykonuje ACES Filmic, winietę 12% i pozostawia mikro-siatkę wyłączoną.
+- HTML-owy HUD nadal jest osobnym, natywnym elementem interfejsu. Podgląd budowania otrzymał własną partię glifów, a odświeżanie zaznaczeń nie czyści już wspólnej warstwy VFX.
+- Wczytywanie zapisu odpina partie GPU przed usunięciem starego świata i przypina je do nowych warstw. Format zapisów i logika symulacji nie zostały zmienione.
+- Kolory podstawowych materiałów pustyni, wody, oazy, lasu, wzgórz, klifów, kamienia, żelaza i smoły zostały przyciemnione w kierunku limitów luminancji z tabeli terenu. Wybrane elementy mają już jawne normalne, wysokości i ID materiału.
+
+**Częściowe — nie oznaczać jako ukończone**
+
+- GPU instancing dotyczy obecnie całej warstwy glifów świata, ale CPU nadal spłaszcza drzewo sceny do rekordów instancji przy odświeżaniu. Docelowy koszt i stabilne 60 FPS nie zostały zmierzone.
+- Bufory wysokości, normalnych, emisji i ID istnieją, lecz wiele detali/budynków nadal korzysta z domyślnych wartości materiału. Jawna geometria i normalne są na razie przypisane do wybranych terenów oraz ścian siedziby.
+- Infrastruktura obsługuje maksymalnie 64 światła, culling i klastrowanie, ale nie ma jeszcze wszystkich pozycji z katalogu świateł (kuźnie, warsztaty, pochodnie, pożary, zaraza, strzały, obiekty strachu i inne).
+- Obecne postacie i glify selekcji korzystają z instancjonowanej ścieżki G-Buffer. Oddzielny, natywny dla ekranu Pass 4 z ostrymi klastrami jednostek, testem głębokości i osobnymi buforami pocisków/cząsteczek nie jest jeszcze ukończony.
+- Próbkowanie komórek uwzględnia fazę kamery i rozdzielczość DPI, ale pełne testy sub-cell lock przy zoomie, czterech obrotach i zmianie rozdzielczości wymagają kontroli obrazu w przeglądarce.
+
+**Pozostałe wymagania źródła do wykonania**
+
+- Pełna paleta ośmiu frakcji oraz komplet materiałów, limitów `L_max`, obrysów i animacji terenu (w tym planowana/wykopana fosa, bąble smoły, drzewa i jelenie).
+- Wizualny FSM wszystkich budynków: pracujący, bez pracownika, pauza, blokada magazynu/surowca, uszkodzenia HP, pożar i rozpad; pełne detale murów, bram, mostów, machin i stosów magazynowych.
+- Pełny roster europejski/arabski/specjalistyczny, machiny oblężnicze, stacking, paski HP, hit-flash `65 ms` i rozpad śmierci `400 ms`.
+- Osobne stany i krzywe VFX strzał, strzał ogniowych, głazów, cienia, pożaru, wrzącego oleju, krowy/zarazy, gaszenia i zawalenia muru.
+- Pełny HUD zgodny z dokumentem: księga raportów z 12 miesiącami, dyplomacja, alerty, komplet kursorów, rozetowe sterowanie PPM i pozostałe szczegółowe panele kontekstowe.
+- Testy akceptacyjne obrazu, w tym test luki w murze, rozróżnianie siedmiu typów terenu i bitwa stresowa `100` łuczników + `50` niewolników + `30` pól smoły + `3` katapulty z krowami. Nie ma jeszcze pomiaru stałych `60 FPS` na zintegrowanym GPU.
+
+**Weryfikacja tej fazy**
+
+- Regresja symulacji, ekonomii, logistyki, trasowania, sterowania, zapisów i HUD-u: `87/87` testów.
+- Testy statyczne sprawdzają atlas, brak obiektów `Text`/`Sprite` per glif, instancing, bufory G-Buffer, światła, downsample krawędzi, Dual-Kawase, ACES, flagę animacji i oddzielny podgląd budowania.
+- TypeScript i produkcyjny build Vite muszą przejść przed publikacją.
+- Nie wykonano testu wizualnego GPU w przeglądarce VPS; brak `libatk-1.0.so.0` nadal uniemożliwia uruchomienie używanego tam headless Chromium. Build i odpowiedzi HTTP nie są traktowane jako dowód jakości obrazu ani wydajności.

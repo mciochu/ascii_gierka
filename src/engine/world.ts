@@ -148,7 +148,7 @@ function addQuadraticPath(parent: Container, start: { x: number; y: number }, co
       x: pointX,
       y: pointY,
       size: 10 + rand() * 8,
-      color: rand() > 0.5 ? "#9a6b45" : "#c08a55",
+      color: rand() > 0.5 ? "#171b20" : "#20242a",
       alpha: 0.42 + rand() * 0.25
     });
   }
@@ -189,9 +189,10 @@ function addRiver(parent: Container): void {
       x,
       y,
       size: 16 + rand() * 16,
-      color: rand() > 0.55 ? "#197eb5" : "#38a8dd",
+      color: rand() > 0.55 ? "#115475" : "#17658b",
       alpha: 0.42 + rand() * 0.2,
-      rotation: -0.22
+      rotation: -0.22,
+      material: "terrain", height: 0.02, animated: true, entityId: "terrain:water"
     });
   }
   for (let i = 0; i < 58; i += 1) {
@@ -204,8 +205,9 @@ function addRiver(parent: Container): void {
       x,
       y,
       size: 7 + rand() * 9,
-      color: "#6bd4e4",
-      alpha: 0.55
+      color: "#287b9b",
+      alpha: 0.55,
+      material: "terrain", height: 0.02, animated: true, entityId: "terrain:water"
     });
   }
 }
@@ -213,7 +215,7 @@ function addRiver(parent: Container): void {
 function addTerrain(layers: WorldLayers): void {
   const rand = random(1204);
   const grass = ["·", "˙", "‚", "⁙", "⸱", "∙", "'", "٫"];
-  const sands = ["#a98a61", "#b99a70", "#c5a77c", "#8f754f", "#d0b386"];
+  const sands = ["#080c12", "#0b1017", "#101720", "#0d131a", "#111821"];
   let placed = 0;
   let attempts = 0;
   while (placed < 680 && attempts < 5000) {
@@ -253,7 +255,7 @@ function addTerrain(layers: WorldLayers): void {
       x,
       y,
       size: 10 + rand() * 20,
-      color: rand() > 0.5 ? "#8998a5" : "#c0cad1",
+      color: rand() > 0.5 ? "#596977" : "#8494a2",
       alpha: 0.35 + rand() * 0.35,
       rotation: rand() * 0.6
     });
@@ -270,7 +272,7 @@ function addTerrain(layers: WorldLayers): void {
         x,
         y,
         size: 14 + rand() * 5,
-        color: "#b28a4b",
+        color: "#4a3b28",
         alpha: 0.42
       });
     }
@@ -280,16 +282,16 @@ function addTerrain(layers: WorldLayers): void {
 function addGridTerrain(layers: WorldLayers, grid: WorldGrid): { glyph: GlyphDisplay; rise: number }[] {
   const elevationMarks: { glyph: GlyphDisplay; rise: number }[] = [];
   const symbols: Record<string, { char: string; color: string; alpha: number }> = {
-    sand: { char: "·", color: "#b69a70", alpha: 0.20 },
-    oasis: { char: "❧", color: "#80c66f", alpha: 0.52 },
-    forest: { char: "♣", color: "#276d3b", alpha: 0.56 },
-    water: { char: "≈", color: "#55b6df", alpha: 0.72 },
-    hill: { char: "﹏", color: "#c5a36d", alpha: 0.43 },
-    cliff: { char: "▲", color: "#c0cbd2", alpha: 0.70 },
-    stone: { char: "◈", color: "#d0d5d9", alpha: 0.74 },
-    iron: { char: "◆", color: "#c98257", alpha: 0.78 },
-    tar: { char: "◉", color: "#384344", alpha: 0.72 },
-    moat: { char: "⌁", color: "#4aa9d5", alpha: 0.8 }
+    sand: { char: "·", color: "#0b1118", alpha: 0.26 },
+    oasis: { char: "❧", color: "#23694f", alpha: 0.52 },
+    forest: { char: "♣", color: "#1c5a3d", alpha: 0.56 },
+    water: { char: "≈", color: "#135475", alpha: 0.72 },
+    hill: { char: "﹏", color: "#202a35", alpha: 0.43 },
+    cliff: { char: "▲", color: "#788995", alpha: 0.70 },
+    stone: { char: "◈", color: "#78838c", alpha: 0.74 },
+    iron: { char: "◆", color: "#9a4528", alpha: 0.78 },
+    tar: { char: "◉", color: "#39234e", alpha: 0.72 },
+    moat: { char: "⌁", color: "#145a78", alpha: 0.8 }
   };
 
   for (const tile of grid.tiles) {
@@ -304,7 +306,12 @@ function addGridTerrain(layers: WorldLayers, grid: WorldGrid): { glyph: GlyphDis
       y: point.y,
       size: tile.terrain === "sand" ? 7 : 10,
       color: mark.color,
-      alpha: mark.alpha
+      alpha: mark.alpha,
+      material: "terrain",
+      height: Math.max(0, Math.min(1, tile.elevation / 4)),
+      normal: tile.terrain === "cliff" ? [0.0, 0.82, 0.57] : tile.terrain === "hill" ? [0.18, 0.34, 0.92] : [0.0, 0.0, 1.0],
+      entityId: "terrain:" + tile.terrain,
+      animated: tile.terrain === "water" || tile.terrain === "oasis" || tile.terrain === "tar"
     });
     elevationMarks.push({ glyph, rise });
     if (tile.terrain === "cliff") {
@@ -313,8 +320,12 @@ function addGridTerrain(layers: WorldLayers, grid: WorldGrid): { glyph: GlyphDis
         x: point.x,
         y: point.y + 8,
         size: 12,
-        color: "#667783",
-        alpha: 0.55
+        color: "#46545e",
+        alpha: 0.55,
+        material: "terrain",
+        height: Math.max(0, Math.min(1, tile.elevation / 4)) * 0.75,
+        normal: [0.0, 0.78, 0.62],
+        entityId: "terrain:cliff"
       });
       elevationMarks.push({ glyph: lowerGlyph, rise });
     }
@@ -331,8 +342,14 @@ function makeKeep(parent: Container, x: number, y: number): Container {
     addGlyph(group, { char: "━", x: dx + (rand() - 0.5) * 2, y: 68 + (rand() - 0.5) * 3, size: 20, color: "#9daab5", alpha: 0.9 });
   }
   for (let dy = -54; dy <= 54; dy += 13) {
-    addGlyph(group, { char: "║", x: -103 + (rand() - 0.5) * 3, y: dy, size: 19, color: "#d4dde2" });
-    addGlyph(group, { char: "║", x: 103 + (rand() - 0.5) * 3, y: dy, size: 19, color: "#d4dde2" });
+    addGlyph(group, {
+      char: "║", x: -103 + (rand() - 0.5) * 3, y: dy, size: 19, color: "#d4dde2",
+      normal: [-0.8, 0.0, 0.6], height: 0.76, material: "building"
+    });
+    addGlyph(group, {
+      char: "║", x: 103 + (rand() - 0.5) * 3, y: dy, size: 19, color: "#d4dde2",
+      normal: [0.8, 0.0, 0.6], height: 0.76, material: "building"
+    });
   }
   const towers = [[-103, -68], [103, -68], [-103, 68], [103, 68]];
   for (const [tx, ty] of towers) {
@@ -429,6 +446,7 @@ function entity(
   team: "player" | "enemy" | "neutral" = "player",
   unitClass?: string
 ): GameEntity {
+  group.label = id;
   return {
     group, id, name, kind, description, role, x, y, health, maxHealth: 100, count, team, unitClass,
     moveSpeed: unitClass === "cavalry" ? 142 : unitClass === "archers" ? 82 : 94,

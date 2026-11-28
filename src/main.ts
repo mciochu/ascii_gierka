@@ -1,13 +1,13 @@
 import { Application, Container } from "pixi.js";
 import "./style.css";
 import {
-  createEffulgenceRenderer,
   DEFAULT_EFFULGENCE_SETTINGS,
   EFFULGENCE_SETTINGS_KEY,
   normalizeEffulgenceSettings,
   type EffulgenceSettings
 } from "./engine/effulgence";
-import { addGlyph, flushGlyphAtlas, type GlyphDisplay } from "./engine/glyph";
+import { addGlyph, type GlyphDisplay } from "./engine/glyph";
+import { createEffulgenceRenderGraph } from "./engine/render-graph";
 import {
   createWatchtower, createTownBuilding, createStorageBuilding, createProductionBuilding, createWorld, WORLD_SIZE,
   type GameEntity, type TownBuildingType, type LogisticsBuildingType
@@ -167,7 +167,18 @@ const worldRoot = new Container();
 worldRoot.sortableChildren = true;
 app.stage.addChild(worldRoot);
 const world = createWorld(worldRoot);
-const effulgence = createEffulgenceRenderer(app, app.stage, worldRoot);
+const effulgence = createEffulgenceRenderGraph(app, worldRoot, world.layers);
+effulgence.setLights([{
+  id: "keep-campfire",
+  x: CAMPFIRE.x,
+  y: CAMPFIRE.y,
+  color: "#FF7B1A",
+  intensity: 1.35,
+  radius: 6.5,
+  flickerHz: 7,
+  flickerAmplitude: 0.08,
+  priority: 100
+}]);
 let effulgenceSettings: EffulgenceSettings = { ...DEFAULT_EFFULGENCE_SETTINGS };
 try {
   const savedVisualSettings = localStorage.getItem(EFFULGENCE_SETTINGS_KEY);
@@ -181,6 +192,7 @@ let buildPreviewLayer = new Container();
 buildPreviewLayer.zIndex = 1000;
 buildPreviewLayer.visible = false;
 worldRoot.addChild(buildPreviewLayer);
+effulgence.setLayers(world.layers, buildPreviewLayer);
 let buildPreviewRing: GlyphDisplay | null = null;
 let buildPreviewGlyph: GlyphDisplay | null = null;
 let lastBuildPreviewClient: { x: number; y: number } | null = null;
@@ -227,7 +239,11 @@ function createCampfireVisuals(): void {
   campfireRingGreen = addGlyph(world.layers.details, { char: "◌", x: CAMPFIRE.x, y: CAMPFIRE.y, size: 62, color: "#68d47f", alpha: 0.9 });
   campfireRingRed = addGlyph(world.layers.details, { char: "◌", x: CAMPFIRE.x, y: CAMPFIRE.y, size: 62, color: "#ef625d", alpha: 0 });
   campfireProgressGlyph = addGlyph(world.layers.details, { char: "◔", x: CAMPFIRE.x, y: CAMPFIRE.y, size: 62, color: "#d8f1d7", alpha: 0.95 });
-  campfireGlyph = addGlyph(world.layers.details, { char: "♨", x: CAMPFIRE.x, y: CAMPFIRE.y, size: 35, color: "#e4ad55", alpha: 0.96 });
+  campfireGlyph = addGlyph(world.layers.details, {
+    char: "♨", x: CAMPFIRE.x, y: CAMPFIRE.y, size: 35, color: "#e4ad55", alpha: 0.96,
+    material: "vfx", height: 0.1, emissive: 1.35, emissiveColor: "#FF7B1A", animated: true,
+    entityId: "keep-campfire"
+  });
   campfireLabel = addGlyph(world.layers.details, { char: "0/24", x: CAMPFIRE.x, y: CAMPFIRE.y - 44, size: 13, color: "#9bd8a7", alpha: 0.9, weight: "bold" });
 }
 createCampfireVisuals();
@@ -408,7 +424,6 @@ function updateScribe(): void {
 function redrawSelectionMarkers(): void {
   for (const marker of selectionMarkers.values()) marker.destroy();
   selectionMarkers.clear();
-  world.layers.effects.removeChildren();
 
   for (const entity of allSelected()) {
     const marker = addGlyph(world.layers.effects, {
@@ -420,7 +435,11 @@ function redrawSelectionMarkers(): void {
       alpha: 0.94,
       weight: "bold",
       stroke: "#000000",
-      strokeWidth: 2
+      strokeWidth: 2,
+      material: "selection",
+      height: 0.025,
+      emissive: 0.15,
+      entityId: "selection:" + entity.id
     });
     selectionMarkers.set(entity.id, marker);
   }
@@ -523,7 +542,8 @@ function updateVillagerVisuals(realDeltaSeconds: number): void {
         char: villager.role === "priest" ? "♙" : "♟",
         x: villager.x, y: villager.y, size: 19,
         color: villager.status === "leaving" ? "#b36b62" : villager.cargo?.length ? "#e4c36e" : villager.role === "priest" ? "#e9dfbc" : "#8bd18a",
-        alpha: 0.96, stroke: "#10140f", strokeWidth: 1
+        alpha: 0.96, stroke: "#10140f", strokeWidth: 1,
+        material: "unit", height: 0.24, entityId: villager.id
       });
       villagerViews.set(villager.id, glyph);
     }
@@ -2449,6 +2469,8 @@ function loadGame(): void {
     closeDialog(); setStatus("Zapis zawiera nieprawidłowe obiekty strachu."); return;
   }
 
+  // Detach GPU batches before disposing the previous world containers.
+  effulgence.setLayers(null);
   // Recreate the deterministic world, then apply the saved state to its entities.
   for (const glyph of villagerViews.values()) glyph.destroy();
   villagerViews.clear();
@@ -2462,6 +2484,7 @@ function loadGame(): void {
   buildPreviewLayer.visible = false;
   lastBuildPreviewClient = null;
   world.layers = freshWorld.layers;
+  effulgence.setLayers(world.layers, buildPreviewLayer);
   world.grid = freshWorld.grid;
   world.setFlattened = freshWorld.setFlattened;
   createCampfireVisuals();
@@ -2914,8 +2937,6 @@ function panCamera(deltaSeconds: number): void {
 
 app.ticker.add((ticker) => {
   const deltaSeconds = Math.min(ticker.deltaMS / 1000, 0.05);
-  flushGlyphAtlas();
-  effulgence.update(performance.now() / 1000);
   // Camera navigation remains available during pause; simulation and unit motion do not.
   panCamera(deltaSeconds);
   minimapRefresh += deltaSeconds;
@@ -2923,7 +2944,12 @@ app.ticker.add((ticker) => {
     minimapRefresh = 0;
     renderMinimap();
   }
-  if (paused) { updateVillagerVisuals(0); return; }
+  if (paused) {
+    updateVillagerVisuals(0);
+    effulgence.update(performance.now() / 1000);
+    effulgence.render();
+    return;
+  }
   const populationBeforeTick = simulation.population;
   const reports = advanceSimulation(simulation, deltaSeconds);
   updateVillagerVisuals(deltaSeconds);
@@ -2948,6 +2974,8 @@ app.ticker.add((ticker) => {
   for (const entity of entities) {
     if (entity.kind === "unit") moveUnit(entity, deltaSeconds);
   }
+  effulgence.update(performance.now() / 1000);
+  effulgence.render();
 });
 
 setMode("select");
@@ -2966,7 +2994,7 @@ updateVillagerVisuals(0);
 renderMinimap();
 updateScribe();
 window.addEventListener("resize", () => {
-  app.stage.filterArea = app.screen;
+  effulgence.resize(app.screen.width, app.screen.height);
   preserveCameraCenter({ x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 });
   renderMinimap();
 });

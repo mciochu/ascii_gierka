@@ -525,6 +525,12 @@ export function createFortification(
       scale: kind === "wall-high" || kind === "gate-large" ? 1.25 : 0.95,
       faction: "order"
     });
+    if (isGate) {
+      const leftDoor = addGlyph(group, { char: "╱", x: -9, y: 1, size: 23, color: "#bd8b55", weight: "bold", alpha: 0, material: "building" });
+      leftDoor.label = "gate-open-left";
+      const rightDoor = addGlyph(group, { char: "╲", x: 9, y: 1, size: 23, color: "#bd8b55", weight: "bold", alpha: 0, material: "building" });
+      rightDoor.label = "gate-open-right";
+    }
     if (kind === "wall-high") addGlyph(group, { char: "╥", x: 0, y: -17, size: 19, color: "#e0dfd0", alpha: 0.9, material: "building" });
   }
   group.position.set(point.x, point.y);

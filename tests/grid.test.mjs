@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createWorldGrid,
+  createTerrainOverview,
   findGridPath,
   GRID_PIVOT,
   isBuildableAtWorld,
@@ -42,6 +43,19 @@ test('wszystkie 10 000 pól mieszczą się w mapie i mają dokładne mapowanie w
   }
   assert.equal(worldToCell(grid, { x: 0, y: 0 }), null);
   assert.equal(worldToCell(grid, { x: 2590, y: 1820 }), null);
+});
+
+test('strategiczny widok kompresuje siatkę 100×100 do czytelnych komórek terenu', () => {
+  const grid = createWorldGrid();
+  const overview = createTerrainOverview(grid, 6);
+  assert.ok(overview.length >= 250 && overview.length <= 300);
+  assert.ok(overview.every((cell) => Number.isFinite(cell.x) && Number.isFinite(cell.y)));
+  assert.ok(overview.every((cell) => cell.x >= 0 && cell.x <= 2600 && cell.y >= 0 && cell.y <= 1850));
+  assert.ok(overview.every((cell) => cell.coverage > 0 && cell.coverage <= 1));
+  const types = new Set(overview.map((cell) => cell.terrain));
+  for (const type of ['sand', 'forest', 'water', 'hill', 'cliff', 'iron']) assert.ok(types.has(type), 'brak makroterenu: ' + type);
+  assert.throws(() => createTerrainOverview(grid, 1), RangeError);
+  assert.throws(() => createTerrainOverview(grid, 26), RangeError);
 });
 
 test('świat ma fizyczne typy terenu, zróżnicowaną wysokość i pola nieprzechodnie', () => {

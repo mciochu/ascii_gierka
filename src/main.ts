@@ -74,6 +74,8 @@ import {
 } from "./engine/grid";
 
 type ToolMode = "select" | "attack-move" | "build" | "demolish";
+const MIN_CAMERA_ZOOM = 0.15;
+const MAX_CAMERA_ZOOM = 2.0;
 type CameraState = { x: number; y: number; zoom: number; rotation: number };
 const TOWN_BUILD_COSTS: Record<TownBuildingType, { wood: number; gold: number }> = {
   hovel: { wood: 6, gold: 0 }, chapel: { wood: 0, gold: 250 },
@@ -2005,7 +2007,7 @@ function preserveCameraCenter(nextCenter: { x: number; y: number }): void {
 }
 
 function zoomAt(nextZoom: number, clientX?: number, clientY?: number): void {
-  const clamped = Math.max(0.5, Math.min(2.0, nextZoom));
+  const clamped = Math.max(MIN_CAMERA_ZOOM, Math.min(MAX_CAMERA_ZOOM, nextZoom));
   if (Math.abs(clamped - zoom) < 0.001) return;
   const rect = canvas.getBoundingClientRect();
   const px = clientX === undefined ? rect.width / 2 : clientX - rect.left;
@@ -2022,7 +2024,14 @@ function zoomAt(nextZoom: number, clientX?: number, clientY?: number): void {
   });
   zoom = clamped;
   worldRoot.scale.set(zoom);
-  worldRoot.position.set(px - offset.x, py - offset.y);
+  if (zoom <= 0.68) {
+    // Strategic zoom is a true map overview, not merely a smaller crop of the
+    // previous camera target. Snap the world pivot to the viewport center.
+    worldRoot.position.set(rect.width / 2, rect.height / 2);
+    lastViewportCenter = { x: rect.width / 2, y: rect.height / 2 };
+  } else {
+    worldRoot.position.set(px - offset.x, py - offset.y);
+  }
   zoomLabel.textContent = String(Math.round(zoom * 100)) + "%";
 }
 
@@ -2512,7 +2521,7 @@ function captureCamera(): { x: number; y: number; zoom: number; rotation: number
 
 function restoreCamera(bookmark: { x: number; y: number; zoom: number; rotation: number }): void {
   mapRotation = bookmark.rotation;
-  zoom = Math.max(0.5, Math.min(2.0, bookmark.zoom));
+  zoom = Math.max(MIN_CAMERA_ZOOM, Math.min(MAX_CAMERA_ZOOM, bookmark.zoom));
   worldRoot.rotation = mapRotation * Math.PI / 2;
   worldRoot.scale.set(zoom);
   worldRoot.position.set(bookmark.x, bookmark.y);

@@ -5,15 +5,21 @@ import { glyphAdvance, splitGlyphText } from "../src/engine/glyph.ts";
 
 const readSource = (file) => readFile(new URL(file, import.meta.url), "utf8");
 
-test("GPU atlas ma stałą siatkę 16×32 z 64 zarezerwowanymi slotami Effulgence", async () => {
+test("GPU atlas ma siatkę 16×32 z trzema bankami gęstości", async () => {
   const source = await readSource("../src/engine/glyph-batch.ts");
   assert.match(source, /ATLAS_COLUMNS\s*=\s*16/);
   assert.match(source, /ATLAS_ROWS\s*=\s*32/);
-  assert.match(source, /ATLAS_CELL_WIDTH\s*=\s*48/);
-  assert.match(source, /ATLAS_CELL_HEIGHT\s*=\s*64/);
+  assert.match(source, /ATLAS_CELL_WIDTH\s*=\s*6/);
+  assert.match(source, /ATLAS_CELL_HEIGHT\s*=\s*8/);
+  assert.match(source, /BASE_GLYPH_BANKS\s*=\s*3/);
+  assert.match(source, /BASE_GLYPH_SLOTS\s*=\s*GLYPH_ATLAS_CHARS\.length\s*\*\s*BASE_GLYPH_BANKS/);
+  assert.match(source, /DENSITY_BANKS[\s\S]*"small"[\s\S]*"medium"[\s\S]*"large"/);
+  assert.match(source, /RASTER_SCALE\s*=\s*8/);
+  assert.match(source, /scaleMode:\s*"nearest"/);
   assert.match(source, /GLYPH_ATLAS_CHARS\.entries\(\)/);
-  assert.match(source, /atlas\.nextSlot\s*=\s*GLYPH_ATLAS_CHARS\.length/);
+  assert.match(source, /nextSlot:\s*BASE_GLYPH_SLOTS/);
   assert.match(source, /BufferImageSource/);
+  assert.match(source, /rasterizeMicroGlyph/);
 });
 
 test("dzielenie tekstu zachowuje polskie znaki i znaki spoza BMP jako pojedyncze glify", () => {
@@ -44,6 +50,7 @@ test("świat używa instancjonowanych quadów GPU zamiast osobnych Text/Sprite n
   assert.match(batch, /instance:\s*true/);
   assert.match(batch, /divisor:\s*1/);
   assert.match(batch, /instanceCount/);
+  assert.match(batch, /aInstanceEmission/);
 });
 
 test("render graph tworzy cztery bufory G-Buffer w formatach zgodnych ze specyfikacją", async () => {
@@ -66,6 +73,11 @@ test("oświetlenie i downsample używają wysokości, normalnych, ID oraz limitu
   assert.match(source, /uNormalHeight/);
   assert.match(source, /uEntityIDs/);
   assert.match(source, /edgeMag/);
+  assert.match(source, /uEmissive/);
+  assert.ok(source.includes("emissiveStrength > 1.0 || layer == 3"));
+  assert.ok(source.includes("else if (layer == 2) priority = 3"));
+  assert.ok(source.includes("else if (layer == 1 && buildingEdge) priority = 2"));
+  assert.match(source, /bestScore/);
   assert.match(source, /0\.8/);
   assert.match(source, /1\.2/);
 });
@@ -85,7 +97,7 @@ test("migotanie jest zależne od flagi animowanego materiału, a nie koloru powi
   const batch = await readSource("../src/engine/glyph-batch.ts");
   const graph = await readSource("../src/engine/render-graph.ts");
   assert.match(batch, /record\.animated \? 128 : 0/);
-  assert.match(graph, /edges\.a > 0\.5/);
+  assert.ok(graph.includes("mod(floor(edges.a / 8.0), 2.0)"));
   assert.match(graph, /floor\(uTime \* 8\.0\)/);
   assert.doesNotMatch(graph, /color\.g\s*>\s*color\.r/);
 });
@@ -99,4 +111,30 @@ test("stara ścieżka Pixi Filter została usunięta, a podgląd budowania ma os
   assert.match(graph, /material: "selection"/);
   assert.match(main, /effulgence\.setLayers\(world\.layers, buildPreviewLayer\)/);
   assert.doesNotMatch(main, /world\.layers\.effects\.removeChildren\(\)/);
+});
+
+test("shader używa wymiarów mikro-atlasu 96×256 i półbloków dla silnych krawędzi", async () => {
+  const graph = await readSource("../src/engine/render-graph.ts");
+  const effect = await readSource("../src/engine/effulgence.ts");
+  assert.ok(graph.includes("new Float32Array([96, 256])"));
+  assert.ok(graph.includes("vec2(6.0, 8.0)"));
+  assert.ok(graph.includes("uGlyphPixelSize"));
+  assert.ok(graph.includes("uGlyphBankRow"));
+  assert.ok(graph.includes("glyphIndex = edges.g >= 0.0 ? 56 : 57"));
+  assert.match(effect, /gutterRight:\s*1/);
+  assert.match(effect, /gutterBottom:\s*1/);
+});
+
+test("oddziały zawierają trzy poziomy detalu i znaczniki taktyczne [xN]", async () => {
+  const world = await readSource("../src/engine/world.ts");
+  const batch = await readSource("../src/engine/glyph-batch.ts");
+  assert.ok(world.includes('lod: "close"'));
+  assert.ok(world.includes('lod: "standard"'));
+  assert.ok(world.includes('lod: "strategic"'));
+  assert.ok(world.includes('char: "[x" + count + "]"'));
+  assert.ok(world.includes('const tacticalGlyph = variant === 1 ? ")" : variant === 2 ? "m" : variant === 3 ? "*" : "█";'));
+  assert.ok(batch.includes("record.lod && record.lod !== profile.lodTier"));
+  assert.ok(batch.includes("profile.unitScale"));
+  assert.ok(batch.includes("microGlyphActiveSize(atlas.view.density)"));
+  assert.match(batch, /setView\(zoom: number, pixelRatio: number, cellWidth: number, cellHeight: number, density: GlyphDensity\)/);
 });

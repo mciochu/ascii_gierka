@@ -32,7 +32,7 @@ test("Opcje Effulgence sterują gęstością, bloomem, jasnością i migotaniem"
   assert.match(main, /data-effulgence-ambient/);
   assert.match(main, /data-effulgence-shimmer/);
   assert.match(main, /localStorage\.setItem\(EFFULGENCE_SETTINGS_KEY/);
-  assert.match(main, /effulgence\.update\(performance\.now\(\) \/ 1000\)/);
+  assert.match(main, /effulgence\.update\(performance\.now\(\) \/ 1000, zoom\)/);
 });
 
 test("HUD działa bez starych referencji do bocznego inspektora i prawego przycisku rozkazów", () => {

@@ -3,11 +3,13 @@ import {
   Shader, Sprite, Texture, TextureSource
 } from "pixi.js";
 import {
-  cellSizeForDensity, DEFAULT_EFFULGENCE_SETTINGS, normalizeEffulgenceSettings,
-  type EffulgenceSettings
+  cellSizeForDensity, DEFAULT_EFFULGENCE_SETTINGS, getZoomProfile, microGlyphActiveSize,
+  normalizeEffulgenceSettings, type EffulgenceSettings, type GlyphDensity
 } from "./effulgence";
 import { createGlyphBatchRenderer } from "./glyph-batch";
 import type { WorldLayers } from "./world";
+
+const DENSITY_BANK_ROW: Record<GlyphDensity, number> = { small: 0, medium: 4, large: 8 };
 
 const FULLSCREEN_VERTEX = `#version 300 es
 in vec2 aPosition;
@@ -72,10 +74,14 @@ layout(location = 1) out vec4 outEdgeData;
 uniform sampler2D uLitHDR;
 uniform sampler2D uAlbedo;
 uniform sampler2D uNormalHeight;
+uniform sampler2D uEmissive;
 uniform highp usampler2D uEntityIDs;
 uniform vec2 uCellSize;
 uniform vec2 uInputSize;
 uniform vec2 uCameraModulo;
+uniform float uZoomNorm;
+
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 ivec2 centerPixel(ivec2 cell) {
   return clamp(cell * ivec2(uCellSize) - ivec2(uCameraModulo) + ivec2(uCellSize * 0.5),
     ivec2(0), ivec2(uInputSize) - ivec2(1));
@@ -93,26 +99,89 @@ vec3 normalAt(ivec2 cell) {
   return a.a > 0.001 ? normalize(n.rgb / a.a) : vec3(0.0, 0.0, 1.0);
 }
 uvec3 idAt(ivec2 cell) { return texelFetch(uEntityIDs, centerPixel(cell), 0).rgb; }
+float decodedHeight(ivec2 p) {
+  vec4 a = texelFetch(uAlbedo, p, 0);
+  vec4 n = texelFetch(uNormalHeight, p, 0);
+  return a.a > 0.001 ? n.a / a.a : 0.0;
+}
+vec3 decodedNormal(ivec2 p) {
+  vec4 a = texelFetch(uAlbedo, p, 0);
+  vec4 n = texelFetch(uNormalHeight, p, 0);
+  return a.a > 0.001 ? normalize(n.rgb / a.a) : vec3(0.0, 0.0, 1.0);
+}
+bool buildingEdgeAt(ivec2 p) {
+  ivec2 maximum = ivec2(uInputSize) - ivec2(1);
+  uvec4 centerId = texelFetch(uEntityIDs, p, 0);
+  if (int(centerId.a & 127u) != 1) return false;
+  float centerHeight = decodedHeight(p);
+  vec3 centerNormal = decodedNormal(p);
+  ivec2 directions[4] = ivec2[4](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+  for (int i = 0; i < 4; i++) {
+    ivec2 q = clamp(p + directions[i], ivec2(0), maximum);
+    uvec4 neighborId = texelFetch(uEntityIDs, q, 0);
+    if (int(neighborId.a & 127u) != 1 || any(notEqual(neighborId.rgb, centerId.rgb))) return true;
+    if (abs(decodedHeight(q) - centerHeight) > mix(0.065, 0.10, uZoomNorm)) return true;
+    if (length(decodedNormal(q) - centerNormal) > 0.22) return true;
+  }
+  return false;
+}
 void main() {
   ivec2 cell = ivec2(gl_FragCoord.xy);
   ivec2 origin = cell * ivec2(uCellSize) - ivec2(uCameraModulo);
   vec3 sum = vec3(0.0);
   float peak = 0.0;
   float samples = 0.0;
-  bool animated = false;
+  float bestScore = -1.0;
+  float bestLuminance = 0.0;
+  vec3 bestColor = vec3(0.0);
+  int winningLayer = 0;
+  int winningPriority = 0;
+  bool bestAnimated = false;
+
+  // Importance-weighted maximum pooling: hero pixels always beat terrain averages.
   for (int y = 0; y < 15; y++) {
     for (int x = 0; x < 10; x++) {
       if (float(x) >= uCellSize.x || float(y) >= uCellSize.y) continue;
       ivec2 p = origin + ivec2(x, y);
       if (p.x < 0 || p.y < 0 || p.x >= int(uInputSize.x) || p.y >= int(uInputSize.y)) continue;
-      vec4 c = texelFetch(uLitHDR, p, 0);
-      sum += c.rgb;
-      peak = max(peak, dot(c.rgb, vec3(0.2126, 0.7152, 0.0722)));
+
+      vec4 albedo = texelFetch(uAlbedo, p, 0);
+      vec4 litSample = texelFetch(uLitHDR, p, 0);
+      if (albedo.a < 0.002 || litSample.a < 0.002) continue;
+      vec3 lit = litSample.rgb / max(litSample.a, 0.0001);
+      float lum = luma(lit);
+      sum += lit;
+      peak = max(peak, lum);
       samples += 1.0;
-      if ((texelFetch(uEntityIDs, p, 0).a & 128u) != 0u) animated = true;
+
+      uvec4 entity = texelFetch(uEntityIDs, p, 0);
+      int layer = int(entity.a & 127u);
+      bool animated = (entity.a & 128u) != 0u;
+      vec3 emissive = texelFetch(uEmissive, p, 0).rgb;
+      float emissiveStrength = max(max(emissive.r, emissive.g), emissive.b);
+      bool buildingEdge = layer == 1 && buildingEdgeAt(p);
+      int priority = 1;
+      if (emissiveStrength > 1.0 || layer == 3) priority = 4;
+      else if (layer == 2) priority = 3;
+      else if (layer == 1 && buildingEdge) priority = 2;
+
+      float score = float(priority) * 10.0 + lum;
+      if (score > bestScore) {
+        bestScore = score;
+        bestLuminance = lum;
+        bestColor = lit;
+        winningLayer = layer;
+        winningPriority = priority;
+        bestAnimated = animated;
+      }
     }
   }
+
   vec3 averageColor = sum / max(samples, 1.0);
+  bool usePriorityWinner = winningPriority > 1;
+  vec3 chosenColor = usePriorityWinner ? bestColor : averageColor;
+  float chosenLuminance = usePriorityWinner ? bestLuminance : peak;
+
   float tl = heightAt(cell + ivec2(-1, -1));
   float tc = heightAt(cell + ivec2(0, -1));
   float tr = heightAt(cell + ivec2(1, -1));
@@ -151,8 +220,10 @@ void main() {
   float edgeMag = max(length(depthGradient),
     max(length(vec2(length(gxN), length(gyN))) * 0.8, length(idGradient) * 1.2));
   vec2 gradient = depthGradient + vec2(length(gxN), length(gyN)) * 0.8 + idGradient * 1.2;
-  outCellData = vec4(averageColor, peak);
-  outEdgeData = vec4(edgeMag, gradient.x, gradient.y, animated ? 1.0 : 0.0);
+  float encodedWinner = float(winningLayer) + (bestAnimated ? 8.0 : 0.0) +
+    (winningPriority == 4 ? 32.0 : 0.0);
+  outCellData = vec4(chosenColor, chosenLuminance);
+  outEdgeData = vec4(edgeMag, gradient.x, gradient.y, encodedWinner);
 }
 `;
 
@@ -169,6 +240,12 @@ uniform vec2 uCameraModulo;
 uniform vec2 uAtlasSize;
 uniform float uTime;
 uniform float uShimmerEnabled;
+uniform float uZoomNorm;
+uniform float uTerrainMaxLuminance;
+uniform float uEdgeThreshold;
+uniform vec2 uGlyphPixelSize;
+uniform float uGlyphBankRow;
+uniform float uPixelRatio;
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 float bayer4(vec2 p) {
   vec2 q = mod(floor(p), 4.0);
@@ -206,18 +283,29 @@ void main() {
   ivec2 cell = clamp(ivec2(cellIndex), ivec2(0), ivec2(uGridSize) - ivec2(1));
   vec4 stats = texelFetch(uCellData, cell, 0);
   vec4 edges = texelFetch(uEdgeData, cell, 0);
+  int winningLayer = int(mod(floor(edges.a + 0.5), 8.0));
+  bool animated = mod(floor(edges.a / 8.0), 2.0) > 0.5;
+  bool priorityFour = floor(edges.a / 32.0) > 0.5;
   float averageL = luma(stats.rgb);
   float level = mix(averageL, stats.a, 0.62);
-  if (uShimmerEnabled > 0.5 && edges.a > 0.5) {
+  if (winningLayer == 0 && !priorityFour) level = min(level, uTerrainMaxLuminance);
+  if (uShimmerEnabled > 0.5 && animated) {
     float stepTime = floor(uTime * 8.0);
     level += (hash21(cellIndex + vec2(stepTime, stepTime * 0.37)) - 0.5) * 0.16;
   }
   level = clamp(level + (bayer4(cellIndex) - 0.5) * 0.055, 0.0, 1.5);
   int glyphIndex = rampIndex(level);
-  if (edges.r > 0.24 && level > 0.12) {
+  if (edges.r > uEdgeThreshold && level > 0.12) {
     float theta = mod(degrees(atan(edges.g, edges.b)) + 90.0, 180.0);
     bool corner = abs(edges.g) > 0.34 && abs(edges.b) > 0.34;
-    if (corner) glyphIndex = 22;
+    if (winningLayer == 1 && edges.r > 0.5) {
+      if (abs(edges.g) > abs(edges.b) * 1.5) glyphIndex = edges.g >= 0.0 ? 56 : 57;
+      else if (abs(edges.b) > abs(edges.g) * 1.5) glyphIndex = edges.b >= 0.0 ? 58 : 59;
+      else if (edges.g >= 0.0 && edges.b >= 0.0) glyphIndex = 60;
+      else if (edges.g < 0.0 && edges.b >= 0.0) glyphIndex = 61;
+      else if (edges.g >= 0.0) glyphIndex = 62;
+      else glyphIndex = 63;
+    } else if (corner) glyphIndex = 22;
     else if (theta < 16.0 || theta >= 164.0) glyphIndex = level > 0.5 ? 20 : 21;
     else if (theta < 70.0) glyphIndex = 17;
     else if (theta < 110.0) glyphIndex = 18;
@@ -227,10 +315,17 @@ void main() {
   vec3 cellColor = clamp(chroma * vec3(0.82, 0.94, 1.10), 0.0, 2.4) * level;
   float whiteMix = smoothstep(0.75, 1.35, level);
   cellColor = mix(cellColor, vec3(level * 1.15), whiteMix * 0.72);
-  vec2 tile = vec2(mod(float(glyphIndex), 16.0), floor(float(glyphIndex) / 16.0));
-  vec2 glyphPx = vec2(48.0, 64.0);
-  vec2 atlasPx = tile * glyphPx + vec2(1.5) + localUV * (glyphPx - vec2(3.0));
-  float mask = texture(uGlyphAtlas, atlasPx / uAtlasSize).r;
+  cellColor *= mix(0.98, 1.0, uZoomNorm);
+  vec2 localPixel = floor(localUV * uCellSize);
+  vec2 activePhysical = uGlyphPixelSize * uPixelRatio;
+  if (localPixel.x >= activePhysical.x || localPixel.y >= activePhysical.y) {
+    finalColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+  vec2 microPixel = floor(localPixel / max(uPixelRatio, 1.0));
+  vec2 tile = vec2(mod(float(glyphIndex), 16.0), floor(float(glyphIndex) / 16.0) + uGlyphBankRow);
+  vec2 glyphPx = tile * vec2(6.0, 8.0) + microPixel + vec2(0.5);
+  float mask = texture(uGlyphAtlas, glyphPx / uAtlasSize).r;
   finalColor = vec4(cellColor * mask, 1.0);
 }
 `;
@@ -244,6 +339,8 @@ uniform vec2 uTexelSize;
 uniform float uThreshold;
 uniform float uKnee;
 uniform float uExtract;
+uniform float uBloomRadius;
+uniform float uZoomNorm;
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 vec3 thresholdColor(vec3 c) {
   float b = luma(c);
@@ -253,7 +350,7 @@ vec3 thresholdColor(vec3 c) {
   return c * contribution;
 }
 void main() {
-  vec2 o = uTexelSize * 0.5;
+  vec2 o = uTexelSize * 0.5 * uBloomRadius * mix(0.45, 1.0, clamp(uZoomNorm, 0.0, 1.0));
   vec3 c = texture(uSource, vUV + vec2(-o.x, -o.y)).rgb;
   c += texture(uSource, vUV + vec2(o.x, -o.y)).rgb;
   c += texture(uSource, vUV + vec2(-o.x, o.y)).rgb;
@@ -271,8 +368,10 @@ out vec4 finalColor;
 uniform sampler2D uLowRes;
 uniform sampler2D uHighRes;
 uniform vec2 uHighTexel;
+uniform float uBloomRadius;
+uniform float uZoomNorm;
 void main() {
-  vec2 o = uHighTexel * 1.5;
+  vec2 o = uHighTexel * 1.5 * uBloomRadius * mix(0.45, 1.0, clamp(uZoomNorm, 0.0, 1.0));
   vec3 h = texture(uHighRes, vUV + vec2(-o.x, -o.y)).rgb;
   h += texture(uHighRes, vUV + vec2(o.x, -o.y)).rgb;
   h += texture(uHighRes, vUV + vec2(-o.x, o.y)).rgb;
@@ -291,6 +390,7 @@ uniform sampler2D uBloom;
 uniform float uBloomIntensity;
 uniform float uVignette;
 uniform float uMicroGrid;
+uniform float uZoomNorm;
 vec3 aces(vec3 c) {
   return clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
 }
@@ -298,7 +398,7 @@ void main() {
   vec3 color = aces(texture(uAsciiHDR, vUV).rgb + texture(uBloom, vUV).rgb * uBloomIntensity);
   vec2 centered = vUV * 2.0 - 1.0;
   float vignette = smoothstep(0.32, 1.5, dot(centered, centered));
-  color *= mix(1.0, 0.88, vignette * uVignette);
+  color *= mix(1.0, mix(0.90, 0.88, uZoomNorm), vignette * uVignette);
   if (uMicroGrid > 0.5 && mod(floor(gl_FragCoord.y), 2.0) < 1.0) color *= 0.985;
   finalColor = vec4(color, 1.0);
 }
@@ -314,7 +414,7 @@ export interface EffulgenceRenderGraph {
   getSettings(): EffulgenceSettings;
   setLights(lights: EffulgenceLight[]): void;
   setLayers(layers: WorldLayers | null, previewRoot?: Container | null): void;
-  update(timeSeconds: number): void;
+  update(timeSeconds: number, zoom?: number): void;
   render(): void;
   resize(width: number, height: number): void;
   destroy(): void;
@@ -492,7 +592,8 @@ export function createEffulgenceRenderGraph(app: Application, worldRoot: Contain
   const cellUniforms = {
     uCellSize: { value: cellSizePx, type: "vec2<f32>" as const },
     uInputSize: { value: new Float32Array([physicalWidth, physicalHeight]), type: "vec2<f32>" as const },
-    uCameraModulo: { value: cameraModulo, type: "vec2<f32>" as const }
+    uCameraModulo: { value: cameraModulo, type: "vec2<f32>" as const },
+    uZoomNorm: { value: 0.24, type: "f32" as const }
   };
   const cellShader = Shader.from({
     gl: { vertex: FULLSCREEN_VERTEX, fragment: CELL_FRAGMENT },
@@ -500,6 +601,7 @@ export function createEffulgenceRenderGraph(app: Application, worldRoot: Contain
       uLitHDR: lightingTexture.source, uLitHDRSampler: lightingTexture.source.style,
       uAlbedo: albedo.source, uAlbedoSampler: albedo.source.style,
       uNormalHeight: normalHeight.source, uNormalHeightSampler: normalHeight.source.style,
+      uEmissive: emissive.source, uEmissiveSampler: emissive.source.style,
       uEntityIDs: entityIds.source, uEntityIDsSampler: entityIds.source.style,
       cellUniforms
     }
@@ -510,9 +612,15 @@ export function createEffulgenceRenderGraph(app: Application, worldRoot: Contain
     uCellSize: { value: cellSizePx, type: "vec2<f32>" as const },
     uGridSize: { value: new Float32Array([cellWidth, cellHeight]), type: "vec2<f32>" as const },
     uCameraModulo: { value: cameraModulo, type: "vec2<f32>" as const },
-    uAtlasSize: { value: new Float32Array([768, 2048]), type: "vec2<f32>" as const },
+    uAtlasSize: { value: new Float32Array([96, 256]), type: "vec2<f32>" as const },
+    uGlyphPixelSize: { value: new Float32Array([4, 6]), type: "vec2<f32>" as const },
+    uGlyphBankRow: { value: 4, type: "f32" as const },
+    uPixelRatio: { value: pixelRatio, type: "f32" as const },
     uTime: { value: 0, type: "f32" as const },
-    uShimmerEnabled: { value: 1, type: "f32" as const }
+    uShimmerEnabled: { value: 1, type: "f32" as const },
+    uZoomNorm: { value: 0.24, type: "f32" as const },
+    uTerrainMaxLuminance: { value: 0.116, type: "f32" as const },
+    uEdgeThreshold: { value: 0.164, type: "f32" as const }
   };
   const glyphShader = Shader.from({
     gl: { vertex: FULLSCREEN_VERTEX, fragment: GLYPH_FRAGMENT },
@@ -529,7 +637,9 @@ export function createEffulgenceRenderGraph(app: Application, worldRoot: Contain
     uTexelSize: { value: new Float32Array([1 / physicalWidth, 1 / physicalHeight]), type: "vec2<f32>" as const },
     uThreshold: { value: 0.72, type: "f32" as const },
     uKnee: { value: 0.15, type: "f32" as const },
-    uExtract: { value: i === 0 ? 1 : 0, type: "f32" as const }
+    uExtract: { value: i === 0 ? 1 : 0, type: "f32" as const },
+    uBloomRadius: { value: 0.582, type: "f32" as const },
+    uZoomNorm: { value: 0.24, type: "f32" as const }
   }));
   const bloomDownPasses = bloomDownUniforms.map((uniforms, i) => {
     const source = i === 0 ? asciiTexture : downTextures[i - 1]!;
@@ -544,13 +654,17 @@ export function createEffulgenceRenderGraph(app: Application, worldRoot: Contain
     return pass;
   });
   const bloomUpPasses: PassMesh[] = [];
+  const bloomUpUniforms: Array<{ uHighTexel: { value: Float32Array; type: "vec2<f32>" }; uBloomRadius: { value: number; type: "f32" }; uZoomNorm: { value: number; type: "f32" } }> = [];
   for (let i = 0; i < 4; i++) {
     const low = i === 0 ? downTextures[3]! : upTextures[i - 1]!;
     const high = i === 0 ? downTextures[2]! : i === 1 ? downTextures[1]! : i === 2 ? downTextures[0]! : asciiTexture;
     const target = upTargets[i]!;
     const uniforms = {
-      uHighTexel: { value: new Float32Array([1 / high.source.width, 1 / high.source.height]), type: "vec2<f32>" as const }
+      uHighTexel: { value: new Float32Array([1 / high.source.width, 1 / high.source.height]), type: "vec2<f32>" as const },
+      uBloomRadius: { value: 0.582, type: "f32" as const },
+      uZoomNorm: { value: 0.24, type: "f32" as const }
     };
+    bloomUpUniforms.push(uniforms);
     const shader = Shader.from({
       gl: { vertex: FULLSCREEN_VERTEX, fragment: BLOOM_UP_FRAGMENT },
       resources: {
@@ -565,7 +679,8 @@ export function createEffulgenceRenderGraph(app: Application, worldRoot: Contain
   const compositeUniforms = {
     uBloomIntensity: { value: DEFAULT_EFFULGENCE_SETTINGS.bloomIntensity / 100, type: "f32" as const },
     uVignette: { value: 1, type: "f32" as const },
-    uMicroGrid: { value: 0, type: "f32" as const }
+    uMicroGrid: { value: 0, type: "f32" as const },
+    uZoomNorm: { value: 0.24, type: "f32" as const }
   };
   const compositeShader = Shader.from({
     gl: { vertex: FULLSCREEN_VERTEX, fragment: COMPOSITE_FRAGMENT },
@@ -578,6 +693,8 @@ export function createEffulgenceRenderGraph(app: Application, worldRoot: Contain
   const compositePass = createPass(compositeShader, logicalWidth, logicalHeight, "Effulgence Pass 6 · Composite");
 
   let settings = normalizeEffulgenceSettings(DEFAULT_EFFULGENCE_SETTINGS);
+  let currentZoom = worldRoot.scale.x || 0.62;
+  let zoomProfile = getZoomProfile(currentZoom);
   let timeSeconds = 0;
   let lights: EffulgenceLight[] = [];
   let activeLightCount = 0;
@@ -630,8 +747,24 @@ export function createEffulgenceRenderGraph(app: Application, worldRoot: Contain
     lightingUniforms.uLightCount.value = activeLightCount;
   };
 
-  const update = (time: number): void => {
+  const update = (time: number, zoom = worldRoot.scale.x || currentZoom): void => {
     timeSeconds = Number.isFinite(time) ? time : 0;
+    currentZoom = Number.isFinite(zoom) ? zoom : currentZoom;
+    zoomProfile = getZoomProfile(currentZoom);
+    glyphBatches.setView(currentZoom, pixelRatio, cellSizePx[0], cellSizePx[1], settings.density);
+    cellUniforms.uZoomNorm.value = zoomProfile.zoomNorm;
+    glyphUniforms.uZoomNorm.value = zoomProfile.zoomNorm;
+    glyphUniforms.uTerrainMaxLuminance.value = zoomProfile.terrainMaxLuminance;
+    glyphUniforms.uEdgeThreshold.value = zoomProfile.edgeThreshold;
+    bloomDownUniforms.forEach((uniforms) => {
+      uniforms.uBloomRadius.value = 1;
+      uniforms.uZoomNorm.value = zoomProfile.zoomNorm;
+    });
+    bloomUpUniforms.forEach((uniforms) => {
+      uniforms.uBloomRadius.value = 1;
+      uniforms.uZoomNorm.value = zoomProfile.zoomNorm;
+    });
+    compositeUniforms.uZoomNorm.value = zoomProfile.zoomNorm;
     cameraModulo[0] = ((Math.floor(worldRoot.position.x * pixelRatio) % cellSizePx[0]) + cellSizePx[0]) % cellSizePx[0];
     cameraModulo[1] = ((Math.floor(worldRoot.position.y * pixelRatio) % cellSizePx[1]) + cellSizePx[1]) % cellSizePx[1];
     cellUniforms.uCameraModulo.value = cameraModulo;
@@ -639,7 +772,7 @@ export function createEffulgenceRenderGraph(app: Application, worldRoot: Contain
     glyphUniforms.uTime.value = timeSeconds;
     glyphUniforms.uShimmerEnabled.value = settings.shimmerEnabled ? 1 : 0;
     lightingUniforms.uTerrainAmbient.value = settings.terrainAmbient / 100;
-    compositeUniforms.uBloomIntensity.value = settings.bloomIntensity / 100;
+    compositeUniforms.uBloomIntensity.value = settings.bloomIntensity / 100 * zoomProfile.bloomIntensityScale;
     updateLightBuffer();
   };
 
@@ -671,11 +804,17 @@ export function createEffulgenceRenderGraph(app: Application, worldRoot: Contain
     cellUniforms.uInputSize.value[0] = physicalWidth;
     cellUniforms.uInputSize.value[1] = physicalHeight;
     glyphUniforms.uCellSize.value = cellSizePx;
+    const glyphPixels = microGlyphActiveSize(settings.density);
+    glyphUniforms.uGlyphPixelSize.value[0] = glyphPixels[0];
+    glyphUniforms.uGlyphPixelSize.value[1] = glyphPixels[1];
+    glyphUniforms.uGlyphBankRow.value = DENSITY_BANK_ROW[settings.density];
+    glyphUniforms.uPixelRatio.value = pixelRatio;
+    glyphBatches.setView(currentZoom, pixelRatio, cellSizePx[0], cellSizePx[1], settings.density);
     glyphUniforms.uGridSize.value[0] = cellWidth;
     glyphUniforms.uGridSize.value[1] = cellHeight;
     glyphUniforms.uShimmerEnabled.value = settings.shimmerEnabled ? 1 : 0;
     lightingUniforms.uTerrainAmbient.value = settings.terrainAmbient / 100;
-    compositeUniforms.uBloomIntensity.value = settings.bloomIntensity / 100;
+    compositeUniforms.uBloomIntensity.value = settings.bloomIntensity / 100 * zoomProfile.bloomIntensityScale;
     const nextKey = String(cellWidth) + ":" + String(cellHeight);
     if (nextKey !== lastCellGrid) {
       cellTarget.resize(cellWidth, cellHeight, 1);
@@ -742,6 +881,7 @@ export function createEffulgenceRenderGraph(app: Application, worldRoot: Contain
     bloomPasses: bloomDownPasses.length + bloomUpPasses.length,
     entityInstances: glyphBatches.stats().instances, activeLights: activeLightCount
   });
+  glyphBatches.setView(currentZoom, pixelRatio, cellSizePx[0], cellSizePx[1], settings.density);
   setSettings(normalizeEffulgenceSettings(DEFAULT_EFFULGENCE_SETTINGS));
 
   return {

@@ -197,7 +197,7 @@ let buildPreviewRing: GlyphDisplay | null = null;
 let buildPreviewGlyph: GlyphDisplay | null = null;
 let lastBuildPreviewClient: { x: number; y: number } | null = null;
 
-let zoom = 0.62;
+let zoom = 1.0;
 let mapRotation = 0;
 const MAP_PIVOT = GRID_PIVOT;
 let mode: ToolMode = "select";
@@ -543,7 +543,8 @@ function updateVillagerVisuals(realDeltaSeconds: number): void {
         x: villager.x, y: villager.y, size: 19,
         color: villager.status === "leaving" ? "#b36b62" : villager.cargo?.length ? "#e4c36e" : villager.role === "priest" ? "#e9dfbc" : "#8bd18a",
         alpha: 0.96, stroke: "#10140f", strokeWidth: 1,
-        material: "unit", height: 0.24, entityId: villager.id
+        material: "unit", height: 0.24, entityId: villager.id,
+        strategicGlyph: villager.role === "priest" ? "†" : "*"
       });
       villagerViews.set(villager.id, glyph);
     }
@@ -1790,7 +1791,7 @@ function preserveCameraCenter(nextCenter: { x: number; y: number }): void {
 }
 
 function zoomAt(nextZoom: number, clientX?: number, clientY?: number): void {
-  const clamped = Math.max(0.28, Math.min(1.7, nextZoom));
+  const clamped = Math.max(0.5, Math.min(2.0, nextZoom));
   if (Math.abs(clamped - zoom) < 0.001) return;
   const rect = canvas.getBoundingClientRect();
   const px = clientX === undefined ? rect.width / 2 : clientX - rect.left;
@@ -1817,7 +1818,7 @@ function updateCompass(): void {
 }
 
 function centerCamera(): void {
-  zoom = 0.62;
+  zoom = 1.0;
   updateCompass();
   worldRoot.pivot.set(MAP_PIVOT.x, MAP_PIVOT.y);
   worldRoot.rotation = mapRotation * Math.PI / 2;
@@ -2027,9 +2028,9 @@ function openOptions(): void {
     '</b><div class="dialog-actions"><button type="button" data-dialog-action="flatten">Spłaszczenie</button><button type="button" data-dialog-action="hud">Ukryj HUD</button></div></div></div>' +
     '<h3>Renderowanie Effulgence · GPU</h3><div class="effulgence-options">' +
     '<label class="dialog-stat"><small>GĘSTOŚĆ GLIFÓW</small><select data-effulgence-density>' +
-    '<option value="small"' + (effulgenceSettings.density === "small" ? " selected" : "") + '>Małe · 6×9</option>' +
-    '<option value="medium"' + (effulgenceSettings.density === "medium" ? " selected" : "") + '>Średnie · 8×12</option>' +
-    '<option value="large"' + (effulgenceSettings.density === "large" ? " selected" : "") + '>Duże · 10×15</option></select></label>' +
+    '<option value="small"' + (effulgenceSettings.density === "small" ? " selected" : "") + '>Ekstremalne · 4×6</option>' +
+    '<option value="medium"' + (effulgenceSettings.density === "medium" ? " selected" : "") + '>Ultra-gęste · 5×7 (zalecane)</option>' +
+    '<option value="large"' + (effulgenceSettings.density === "large" ? " selected" : "") + '>Zbalansowane · 6×8</option></select></label>' +
     '<label class="dialog-stat"><small>BLOOM · <output data-effulgence-value="bloom">' + effulgenceSettings.bloomIntensity + '%</output></small><input type="range" min="0" max="150" step="5" value="' + effulgenceSettings.bloomIntensity + '" data-effulgence-bloom></label>' +
     '<label class="dialog-stat"><small>JASNOŚĆ TERENU · <output data-effulgence-value="ambient">' + effulgenceSettings.terrainAmbient + '%</output></small><input type="range" min="50" max="150" step="5" value="' + effulgenceSettings.terrainAmbient + '" data-effulgence-ambient></label>' +
     '<label class="dialog-stat effulgence-toggle"><small>MIGOTANIE GLIFÓW · 8 HZ</small><input type="checkbox" data-effulgence-shimmer' + (effulgenceSettings.shimmerEnabled ? ' checked' : '') + '> Włączone</label>' +
@@ -2280,7 +2281,7 @@ function captureCamera(): { x: number; y: number; zoom: number; rotation: number
 
 function restoreCamera(bookmark: { x: number; y: number; zoom: number; rotation: number }): void {
   mapRotation = bookmark.rotation;
-  zoom = bookmark.zoom;
+  zoom = Math.max(0.5, Math.min(2.0, bookmark.zoom));
   worldRoot.rotation = mapRotation * Math.PI / 2;
   worldRoot.scale.set(zoom);
   worldRoot.position.set(bookmark.x, bookmark.y);
@@ -2946,7 +2947,7 @@ app.ticker.add((ticker) => {
   }
   if (paused) {
     updateVillagerVisuals(0);
-    effulgence.update(performance.now() / 1000);
+    effulgence.update(performance.now() / 1000, zoom);
     effulgence.render();
     return;
   }
@@ -2974,7 +2975,7 @@ app.ticker.add((ticker) => {
   for (const entity of entities) {
     if (entity.kind === "unit") moveUnit(entity, deltaSeconds);
   }
-  effulgence.update(performance.now() / 1000);
+  effulgence.update(performance.now() / 1000, zoom);
   effulgence.render();
 });
 

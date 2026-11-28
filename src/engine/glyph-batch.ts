@@ -12,7 +12,12 @@ import {
   EDGE_GLYPHS,
   GLYPH_ATLAS_CHARS,
   LUMINANCE_RAMP,
-  SPECIAL_GLYPHS
+  SPECIAL_GLYPHS,
+  MICRO_GLYPH_CELL,
+  getZoomProfile,
+  microGlyphActiveSize,
+  rasterizeMicroGlyph,
+  type GlyphDensity
 } from "./effulgence";
 import {
   GlyphDisplay,
@@ -22,14 +27,17 @@ import {
 
 const ATLAS_COLUMNS = 16;
 const ATLAS_ROWS = 32;
-const ATLAS_CELL_WIDTH = 48;
-const ATLAS_CELL_HEIGHT = 64;
+const ATLAS_CELL_WIDTH = 6;
+const ATLAS_CELL_HEIGHT = 8;
+const BASE_GLYPH_BANKS = 3;
+const BASE_GLYPH_SLOTS = GLYPH_ATLAS_CHARS.length * BASE_GLYPH_BANKS;
+const DENSITY_BANKS: readonly GlyphDensity[] = ["small", "medium", "large"];
+const RASTER_SCALE = 8;
 const ATLAS_WIDTH = ATLAS_COLUMNS * ATLAS_CELL_WIDTH;
 const ATLAS_HEIGHT = ATLAS_ROWS * ATLAS_CELL_HEIGHT;
 const ATLAS_CAPACITY = ATLAS_COLUMNS * ATLAS_ROWS;
-const ATLAS_MARGIN = 1.5;
 
-const INSTANCE_FLOATS = 24;
+const INSTANCE_FLOATS = 28;
 const INSTANCE_STRIDE_BYTES = INSTANCE_FLOATS * 4;
 const INITIAL_INSTANCE_CAPACITY = 4096;
 
@@ -65,12 +73,14 @@ in vec4 aInstanceTint;
 in vec4 aInstanceMeta;
 in vec4 aInstanceId;
 in vec4 aInstanceNormal;
+in vec4 aInstanceEmission;
 
 out vec2 vUV;
 out vec4 vTint;
 out vec4 vMeta;
 flat out uvec4 vEntityId;
 out vec4 vNormal;
+out vec4 vEmission;
 
 uniform mat3 uProjectionMatrix;
 uniform mat3 uWorldTransformMatrix;
@@ -91,6 +101,7 @@ void main() {
   vMeta = aInstanceMeta;
   vEntityId = uvec4(round(aInstanceId));
   vNormal = aInstanceNormal;
+  vEmission = aInstanceEmission;
 }
 `;
 
@@ -103,6 +114,7 @@ in vec4 vTint;
 in vec4 vMeta;
 flat in uvec4 vEntityId;
 in vec4 vNormal;
+in vec4 vEmission;
 
 uniform sampler2D uGlyphAtlas;
 
@@ -113,7 +125,7 @@ layout(location = 3) out highp uvec4 outEntityID;
 
 void main() {
   float mask = texture(uGlyphAtlas, vUV).r;
-  if (mask < 0.045 || vTint.a < 0.002) discard;
+  if (mask < 0.5 || vTint.a < 0.002) discard;
 
   float coverage = clamp(mask * vTint.a, 0.0, 1.0);
   vec3 albedo = vTint.rgb;
@@ -121,7 +133,7 @@ void main() {
 
   outAlbedo = vec4(albedo * coverage, coverage);
   outNormalHeight = vec4(normal * coverage, clamp(vMeta.z, 0.0, 1.0) * coverage);
-  outEmissive = vec4(albedo * max(vMeta.w, 0.0) * coverage, coverage);
+  outEmissive = vec4(vEmission.rgb * max(vMeta.w, 0.0) * coverage, coverage);
   outEntityID = vEntityId;
 }
 `;
@@ -138,6 +150,7 @@ export interface GlyphBatchRenderer {
   update(): void;
   destroy(): void;
   stats(): { layers: number; instances: number; uniqueGlyphs: number; capacity: number };
+  setView(zoom: number, pixelRatio: number, cellWidth: number, cellHeight: number, density: GlyphDensity): void;
 }
 
 interface AtlasData {
@@ -150,6 +163,7 @@ interface AtlasData {
   dirtyEnd: number;
   temporaryCanvas: HTMLCanvasElement;
   temporaryContext: CanvasRenderingContext2D;
+  view: { zoom: number; pixelRatio: number; cellWidth: number; cellHeight: number; density: GlyphDensity };
 }
 
 interface Transform2D {
@@ -179,63 +193,105 @@ function createAtlas(): AtlasData {
     width: ATLAS_WIDTH,
     height: ATLAS_HEIGHT,
     format: "r8unorm",
-    scaleMode: "linear",
+    scaleMode: "nearest",
     alphaMode: "no-premultiply-alpha"
   });
   const texture = new Texture({ source });
   const temporaryCanvas = document.createElement("canvas");
-  temporaryCanvas.width = ATLAS_CELL_WIDTH;
-  temporaryCanvas.height = ATLAS_CELL_HEIGHT;
+  temporaryCanvas.width = ATLAS_CELL_WIDTH * RASTER_SCALE;
+  temporaryCanvas.height = ATLAS_CELL_HEIGHT * RASTER_SCALE;
   const temporaryContext = temporaryCanvas.getContext("2d", { willReadFrequently: true });
   if (!temporaryContext) throw new Error("Cannot create the Effulgence monochrome glyph rasterizer.");
 
   const atlas: AtlasData = {
-    pixels, source, texture, lookup: new Map(), nextSlot: 0,
+    pixels, source, texture, lookup: new Map(), nextSlot: BASE_GLYPH_SLOTS,
     dirtyStart: Number.POSITIVE_INFINITY,
     dirtyEnd: 0,
     temporaryCanvas,
-    temporaryContext
+    temporaryContext,
+    view: { zoom: 0.62, pixelRatio: 1, cellWidth: 5, cellHeight: 7, density: "medium" }
   };
 
-  for (const [index, character] of GLYPH_ATLAS_CHARS.entries()) {
-    if (!atlas.lookup.has(character)) atlas.lookup.set(character, index);
-    rasterizeGlyph(atlas, character, index, "normal");
-  }
-  atlas.nextSlot = GLYPH_ATLAS_CHARS.length;
-  if (!atlas.lookup.has("?")) {
-    atlas.lookup.set("?", atlas.nextSlot);
-    rasterizeGlyph(atlas, "?", atlas.nextSlot, "normal");
-    atlas.nextSlot += 1;
+  // Three fixed banks provide real 3×5, 4×6 and 5×7 1-bit variants.
+  for (const [bank, density] of DENSITY_BANKS.entries()) {
+    for (const [glyphIndex, character] of GLYPH_ATLAS_CHARS.entries()) {
+      rasterizeGlyph(atlas, character, bank * GLYPH_ATLAS_CHARS.length + glyphIndex, "normal", density);
+    }
   }
   flushAtlas(atlas);
   return atlas;
+}
+
+const MICRO_GLYPH_ALIASES: Record<string, string> = {
+  "♞": "m", "♟": "█", "♙": "█", "⚑": "!", "♨": "*",
+  "◌": "o", "◔": "o", "◈": "o", "◇": "o", "◩": "#",
+  "╔": "+", "╗": "+", "╚": "+", "╝": "+", "╬": "+", "╧": "+",
+  "━": "=", "═": "=", "─": "-", "╱": "/", "╲": "\\",
+  "▤": "#", "▥": "#", "▧": "#", "⌂": "A", "⌜": "+",
+  "Ł": "L", "Ą": "A", "Ę": "E", "Ó": "O", "Ś": "S", "Ć": "C", "Ż": "Z", "Ź": "Z", "Ń": "N",
+  "ł": "l", "ą": "a", "ę": "e", "ó": "o", "ś": "s", "ć": "c", "ż": "z", "ź": "z", "ń": "n"
+};
+
+function drawHalfBlock(context: CanvasRenderingContext2D, character: string, density: GlyphDensity): boolean {
+  const [activeColumns, activeRows] = microGlyphActiveSize(density);
+  const width = activeColumns * RASTER_SCALE;
+  const height = activeRows * RASTER_SCALE;
+  const halfWidth = Math.floor(width / 2);
+  const halfHeight = Math.floor(height / 2);
+  const blocks: Record<string, [number, number, number, number]> = {
+    "█": [0, 0, width, height], "▀": [0, 0, width, halfHeight], "▄": [0, halfHeight, width, height - halfHeight],
+    "▌": [0, 0, halfWidth, height], "▐": [halfWidth, 0, width - halfWidth, height],
+    "▖": [0, halfHeight, halfWidth, height - halfHeight], "▗": [halfWidth, halfHeight, width - halfWidth, height - halfHeight],
+    "▘": [0, 0, halfWidth, halfHeight], "▝": [halfWidth, 0, width - halfWidth, halfHeight]
+  };
+  const block = blocks[character];
+  if (!block) return false;
+  context.fillRect(block[0], block[1], block[2], block[3]);
+  return true;
 }
 
 function rasterizeGlyph(
   atlas: AtlasData,
   character: string,
   index: number,
-  weight: "normal" | "bold"
+  weight: "normal" | "bold",
+  density: GlyphDensity
 ): void {
   const context = atlas.temporaryContext;
-  context.clearRect(0, 0, ATLAS_CELL_WIDTH, ATLAS_CELL_HEIGHT);
+  context.clearRect(0, 0, atlas.temporaryCanvas.width, atlas.temporaryCanvas.height);
   context.fillStyle = "#ffffff";
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.font = (weight === "bold" ? "700 " : "500 ") +
-    '58px "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace';
-  context.fillText(character, ATLAS_CELL_WIDTH / 2, ATLAS_CELL_HEIGHT / 2 + 1);
+  context.save();
+  const [activeColumns, activeRows] = microGlyphActiveSize(density);
+  context.beginPath();
+  context.rect(0, 0, activeColumns * RASTER_SCALE, activeRows * RASTER_SCALE);
+  context.clip();
+  const displayCharacter = MICRO_GLYPH_ALIASES[character] ?? character;
+  const isBlock = drawHalfBlock(context, character, density);
+  if (!isBlock && displayCharacter !== " ") {
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.font = (weight === "bold" ? "700 " : "500 ") +
+      '50px "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace';
+    context.fillText(
+      displayCharacter,
+      activeColumns * RASTER_SCALE / 2,
+      activeRows * RASTER_SCALE / 2
+    );
+  }
+  context.restore();
 
-  const image = context.getImageData(0, 0, ATLAS_CELL_WIDTH, ATLAS_CELL_HEIGHT);
+  const image = context.getImageData(0, 0, atlas.temporaryCanvas.width, atlas.temporaryCanvas.height);
+  const alpha = new Uint8Array(atlas.temporaryCanvas.width * atlas.temporaryCanvas.height);
+  for (let i = 0; i < alpha.length; i += 1) alpha[i] = image.data[i * 4 + 3] ?? 0;
+  const micro = rasterizeMicroGlyph(alpha, atlas.temporaryCanvas.width, atlas.temporaryCanvas.height, 160, density);
+
   const column = index % ATLAS_COLUMNS;
   const row = Math.floor(index / ATLAS_COLUMNS);
   const atlasX = column * ATLAS_CELL_WIDTH;
   const atlasY = row * ATLAS_CELL_HEIGHT;
-
   for (let y = 0; y < ATLAS_CELL_HEIGHT; y += 1) {
     for (let x = 0; x < ATLAS_CELL_WIDTH; x += 1) {
-      const alpha = image.data[(y * ATLAS_CELL_WIDTH + x) * 4 + 3] ?? 0;
-      atlas.pixels[(atlasY + y) * ATLAS_WIDTH + atlasX + x] = alpha;
+      atlas.pixels[(atlasY + y) * ATLAS_WIDTH + atlasX + x] = micro[y * ATLAS_CELL_WIDTH + x] ?? 0;
     }
   }
 
@@ -253,14 +309,22 @@ function flushAtlas(atlas: AtlasData): void {
 }
 
 function atlasSlot(atlas: AtlasData, character: string, weight: "normal" | "bold"): number {
-  const key = weight === "bold" ? "bold:" + character : character;
+  const densityBank = DENSITY_BANKS.indexOf(atlas.view.density);
+  const baseIndex = GLYPH_ATLAS_CHARS.indexOf(character as (typeof GLYPH_ATLAS_CHARS)[number]);
+  if (weight === "normal" && baseIndex >= 0) {
+    return Math.max(0, densityBank) * GLYPH_ATLAS_CHARS.length + baseIndex;
+  }
+
+  const key = atlas.view.density + ":" + weight + ":" + character;
   const existing = atlas.lookup.get(key);
   if (existing !== undefined) return existing;
 
-  if (atlas.nextSlot >= ATLAS_CAPACITY) return atlas.lookup.get("?") ?? 0;
+  if (atlas.nextSlot >= ATLAS_CAPACITY) {
+    return Math.max(0, densityBank) * GLYPH_ATLAS_CHARS.length + 8;
+  }
   const slot = atlas.nextSlot++;
   atlas.lookup.set(key, slot);
-  rasterizeGlyph(atlas, character, slot, weight);
+  rasterizeGlyph(atlas, character, slot, weight, atlas.view.density);
   return slot;
 }
 
@@ -328,22 +392,28 @@ function instanceValues(
   const materialId = MATERIAL_IDS[material] ?? MATERIAL_IDS[layer.input.material];
   const entityId = hashEntityId(record.entityId ?? entityLabel);
   const [red, green, blue] = colorChannels(record.color);
-  const slot = atlasSlot(atlas, record.character, record.weight);
+  const profile = getZoomProfile(atlas.view.zoom);
+  if (record.lod && record.lod !== profile.lodTier) return offset;
+  const character = profile.lodTier === "strategic" && record.strategicGlyph
+    ? record.strategicGlyph : record.character;
+  const slot = atlasSlot(atlas, character, record.weight);
   const column = slot % ATLAS_COLUMNS;
   const row = Math.floor(slot / ATLAS_COLUMNS);
+  const [activeWidth, activeHeight] = microGlyphActiveSize(atlas.view.density);
 
-  const u0 = (column * ATLAS_CELL_WIDTH + ATLAS_MARGIN) / ATLAS_WIDTH;
-  const v0 = (row * ATLAS_CELL_HEIGHT + ATLAS_MARGIN) / ATLAS_HEIGHT;
-  const u1 = ((column + 1) * ATLAS_CELL_WIDTH - ATLAS_MARGIN) / ATLAS_WIDTH;
-  const v1 = ((row + 1) * ATLAS_CELL_HEIGHT - ATLAS_MARGIN) / ATLAS_HEIGHT;
+  const u0 = (column * ATLAS_CELL_WIDTH + 0.5) / ATLAS_WIDTH;
+  const v0 = (row * ATLAS_CELL_HEIGHT + 0.5) / ATLAS_HEIGHT;
+  const u1 = (column * ATLAS_CELL_WIDTH + activeWidth - 0.5) / ATLAS_WIDTH;
+  const v1 = (row * ATLAS_CELL_HEIGHT + activeHeight - 0.5) / ATLAS_HEIGHT;
 
   const rotation = transform.rotation;
   const cosine = Math.cos(rotation);
   const sine = Math.sin(rotation);
   const baseX = transform.x + record.offsetX * transform.scaleX * cosine - record.offsetY * transform.scaleY * sine;
   const baseY = transform.y + record.offsetX * transform.scaleX * sine + record.offsetY * transform.scaleY * cosine;
-  const width = record.size * 0.80 * transform.scaleX;
-  const height = record.size * 1.15 * transform.scaleY;
+  const unitBoost = material === "unit" ? profile.unitScale : 1;
+  const width = record.size * 0.80 * transform.scaleX * unitBoost;
+  const height = record.size * 1.15 * transform.scaleY * unitBoost;
   const alpha = Math.max(0, Math.min(1, transform.alpha));
   const materialLayerByte = materialId | (record.animated ? 128 : 0);
   const normal = record.normal;
@@ -373,6 +443,11 @@ function instanceValues(
   data[offset + 21] = normal[1];
   data[offset + 22] = normal[2];
   data[offset + 23] = record.animated ? 1 : 0;
+  const [emissionRed, emissionGreen, emissionBlue] = colorChannels(record.emissiveColor);
+  data[offset + 24] = emissionRed;
+  data[offset + 25] = emissionGreen;
+  data[offset + 26] = emissionBlue;
+  data[offset + 27] = 1;
   return offset + INSTANCE_FLOATS;
 }
 
@@ -413,6 +488,10 @@ function createLayerBatch(input: GlyphBatchLayerInput, shader: Shader): LayerBat
       aInstanceNormal: {
         buffer, format: "float32x4", stride: INSTANCE_STRIDE_BYTES,
         offset: 80, instance: true, divisor: 1
+      },
+      aInstanceEmission: {
+        buffer, format: "float32x4", stride: INSTANCE_STRIDE_BYTES,
+        offset: 96, instance: true, divisor: 1
       }
     },
     indexBuffer: QUAD_INDICES,
@@ -561,6 +640,9 @@ export function createGlyphBatchRenderer(
 
   return {
     atlasTexture: atlas.texture,
+    setView(zoom: number, pixelRatio: number, cellWidth: number, cellHeight: number, density: GlyphDensity): void {
+      atlas.view = { zoom, pixelRatio, cellWidth, cellHeight, density };
+    },
     setRoots(roots: Array<Container | null> | null): void {
       batches.forEach((batch, index) => {
         const nextRoot = roots?.[index] ?? null;
@@ -599,6 +681,12 @@ export const EFFULGENCE_GLYPH_ATLAS = Object.freeze({
   rows: ATLAS_ROWS,
   cellWidth: ATLAS_CELL_WIDTH,
   cellHeight: ATLAS_CELL_HEIGHT,
+  activeWidth: MICRO_GLYPH_CELL.activeWidth,
+  activeHeight: MICRO_GLYPH_CELL.activeHeight,
+  reservedBanks: BASE_GLYPH_BANKS,
+  reservedSlots: BASE_GLYPH_SLOTS,
+  gutterRight: MICRO_GLYPH_CELL.gutterRight,
+  gutterBottom: MICRO_GLYPH_CELL.gutterBottom,
   capacity: ATLAS_CAPACITY,
   fixedSlots: {
     ramp: LUMINANCE_RAMP.length,

@@ -305,3 +305,49 @@ Ta faza zastępuje wcześniejszy tymczasowy renderer filtrów oraz wcześniejszy
 - Testy statyczne sprawdzają atlas, brak obiektów `Text`/`Sprite` per glif, instancing, bufory G-Buffer, światła, downsample krawędzi, Dual-Kawase, ACES, flagę animacji i oddzielny podgląd budowania.
 - TypeScript i produkcyjny build Vite muszą przejść przed publikacją.
 - Nie wykonano testu wizualnego GPU w przeglądarce VPS; brak `libatk-1.0.so.0` nadal uniemożliwia uruchomienie używanego tam headless Chromium. Build i odpowiedzi HTTP nie są traktowane jako dowód jakości obrazu ani wydajności.
+
+## Ultra-gęste ASCII i czytelność strategiczna — faza 4 (2026-11-28)
+
+Ta faza wdraża pięć mechanizmów z dokumentu Wklejony tekst(20261128-000418).txt. Nie zmienia logiki symulacji, ekonomii, logistyki ani formatu zapisów.
+
+**1. Pixel-perfect Micro-Atlas**
+- Atlas ma siatkę 16×32, komórki magazynowe 6×8 i filtrowanie nearest. Trzy pierwsze banki zawierają po 64 podstawowe glify: tryb ekstremalny 3×5, zalecany ultra-gęsty 4×6 oraz zbalansowany 5×7.
+- Komórka wyjściowa każdego wariantu zachowuje jeden czarny piksel po prawej i na dole: odpowiednio 4×6, 5×7 i 6×8.
+- Rasteryzacja kończy się maską wyłącznie 0/255; źródłowy antyaliasing jest progowany przed zapisem do tekstury R8. Glify nie są skalowane filtrem liniowym.
+- Przy pixelRatio > 1 shader powiększa każdy bit nearest-neighbor i zachowuje gutter jako jeden piksel logiczny.
+- Pozostałe sloty atlasu mieszczą dodatkowe znaki Unicode i warianty pogrubione. Limit całego atlasu nadal wynosi 512 komórek.
+
+**2. Importance-Weighted Max-Pooling w Passie 2**
+- Każda komórka próbuje wszystkie piksele wejściowe i wybiera zwycięzcę według priorytetu zakodowanej warstwy oraz emisji.
+- Priorytet 4: warstwa selekcji/VFX oraz emissive > 1.0.
+- Priorytet 3: jednostki (layer 2).
+- Priorytet 2: krawędzie budynków (layer 1) wykryte z sąsiednich ID, wysokości i normalnych.
+- Priorytet 1: płaski teren, wnętrza i dachy; tylko te próbki przechodzą klasyczne uśrednianie.
+- Sobel nadal łączy gradient wysokości, normalnych i ID z wagami odpowiednio 1.0, 0.8 i 1.2.
+
+**3. Kompensacja zoomu**
+- Zakres kamery wynosi teraz 0.5×–2.0×, a widok początkowy/reset to 1.0×. Starsze zakładki kamery są ograniczane do nowego zakresu przy odtwarzaniu.
+- u_zoomNorm jest normalizowany między 0.5× i 2.0×; profil strategiczny jest aktywny w pobliżu 0.5×, standardowy wokół 1.0×, a zbliżenie od 1.5×.
+- Maksymalna luminancja terenu przechodzi od 0.09 do 0.20; promień bloom od 0.45 do 1.0; intensywność bloom od 0.65 do 1.0; próg krawędzi od 0.14 do 0.24.
+- Jednostki otrzymują dodatkowe 25% skali w widoku strategicznym, by nie znikały pomiędzy komórkami terenu.
+
+**4. Glyph LOD**
+- Oddziały startowe posiadają odrębne rekordy dla pełnej sylwetki z bliska (3×5), klastra standardowego (2×3) i znaku taktycznego z daleka.
+- Tryb strategiczny używa klas: ) łucznik, █ piechota, m kawaleria i * oddział najeźdźców/niewolników; stos ma etykietę [xN].
+- LOD jest wybierany bez zmiany danych jednostki ani stanu symulacji.
+
+**5. Półbloki**
+- Atlas zawiera komplet ▀, ▄, ▌, ▐, ▖, ▗, ▘, ▝.
+- Silne krawędzie budynków (edge > 0.5) mogą korzystać z tych znaków, a pozostałe krawędzie i wypełnienia pozostają na rampie znaków.
+
+**Silnik i zakres**
+- Pozostaje TypeScript + Vite z własnym potokiem GLSL/WebGL2. Obecna warstwa PixiJS zapewnia aplikację i zasoby renderera, ale nie zastępuje własnych passów G-Buffer, priority pooling, glifów i bloom.
+- Nie wykonano migracji do Godot ani Three.js: nie byłaby potrzebna do funkcji tej specyfikacji i zwiększałaby ryzyko regresji działającej symulacji.
+- Ta faza nie kończy innych punktów z wcześniejszej, szerszej specyfikacji Effulgence: pełnego rosteru, wszystkich VFX, wszystkich źródeł świateł, kompletnego HUD-u ani natywnego Passu 4.
+
+**Weryfikacja fazy 4**
+- 97/97 testów automatycznych — PASS.
+- TypeScript tsc --noEmit — PASS.
+- Produkcyjny vite build — PASS.
+- git diff --check — PASS.
+- Nie wykonano testu wizualnego GPU ani pomiaru 60 FPS; serwerowy Chromium nadal nie uruchamia się z powodu brakującej biblioteki libatk-1.0.so.0. Testy statyczne potwierdzają strukturę i logikę shaderów, ale nie zastępują kontroli obrazu na rzeczywistym GPU.

@@ -1,10 +1,21 @@
 export type GlyphDensity = "small" | "medium" | "large";
+export type GlyphLodTier = "close" | "standard" | "strategic";
 
 export interface EffulgenceSettings {
   density: GlyphDensity;
   bloomIntensity: number;
   terrainAmbient: number;
   shimmerEnabled: boolean;
+}
+
+export interface EffulgenceZoomProfile {
+  zoomNorm: number;
+  lodTier: GlyphLodTier;
+  terrainMaxLuminance: number;
+  bloomRadiusScale: number;
+  bloomIntensityScale: number;
+  edgeThreshold: number;
+  unitScale: number;
 }
 
 export const DEFAULT_EFFULGENCE_SETTINGS: Readonly<EffulgenceSettings> = Object.freeze({
@@ -16,11 +27,26 @@ export const DEFAULT_EFFULGENCE_SETTINGS: Readonly<EffulgenceSettings> = Object.
 
 export const EFFULGENCE_SETTINGS_KEY = "dominium.effulgence.settings.v1";
 
+// Physical-pixel cell sizes: strategic extreme, recommended ultra-dense, balanced.
 const CELL_SIZES: Record<GlyphDensity, readonly [number, number]> = {
-  small: [6, 9],
-  medium: [8, 12],
-  large: [10, 15]
+  small: [4, 6],
+  medium: [5, 7],
+  large: [6, 8]
 };
+
+export const MICRO_GLYPH_CELL = Object.freeze({
+  width: 6,
+  height: 8,
+  activeWidth: 4,
+  activeHeight: 6,
+  gutterRight: 1,
+  gutterBottom: 1
+});
+
+export function microGlyphActiveSize(density: GlyphDensity): readonly [number, number] {
+  const [cellWidth, cellHeight] = CELL_SIZES[density];
+  return [cellWidth - 1, cellHeight - 1];
+}
 
 export const LUMINANCE_RAMP = [
   " ", ".", "'", ",", ":", ";", "-", "~",
@@ -29,12 +55,14 @@ export const LUMINANCE_RAMP = [
 
 export const EDGE_GLYPHS = ["-", "/", "|", "\\", "=", "_", "+", "╳"] as const;
 
+export const HALF_BLOCK_GLYPHS = ["▀", "▄", "▌", "▐", "▖", "▗", "▘", "▝"] as const;
+
 export const SPECIAL_GLYPHS = [
   ">", "^", "/", "-", ".", "*", "~", "'",
-  "@", "#", "o", "(", ")", "%", ":", ".",
-  "~", "c", "&", "░", "·", "+", "▒", "≈",
-  "=", "║", "X", "!", "┼", ")", "†", "T",
-  "♞", "♟", "⚑", "O", "Ø", "Θ", "▓", "W"
+  "@", "#", "o", "(", ")", "%", ";", "c",
+  "&", "░", "·", "+", "▒", "≈", "=", "║",
+  "X", "!", "┼", "†", "T", "♞", "♟", "⚑",
+  ...HALF_BLOCK_GLYPHS
 ] as const;
 
 export const GLYPH_ATLAS_CHARS = [
@@ -50,6 +78,70 @@ const LUMINANCE_THRESHOLDS = [
 
 export function cellSizeForDensity(density: GlyphDensity): readonly [number, number] {
   return CELL_SIZES[density];
+}
+
+export function getZoomProfile(zoom: number): EffulgenceZoomProfile {
+  const safeZoom = Number.isFinite(zoom) ? Math.max(0.5, Math.min(2.0, zoom)) : 1.0;
+  const zoomNorm = Math.max(0, Math.min(1, (safeZoom - 0.5) / (2.0 - 0.5)));
+  const lodTier: GlyphLodTier = safeZoom <= 0.65
+    ? "strategic"
+    : safeZoom >= 1.5 ? "close" : "standard";
+  return {
+    zoomNorm,
+    lodTier,
+    terrainMaxLuminance: 0.09 + 0.11 * zoomNorm,
+    bloomRadiusScale: 0.45 + 0.55 * zoomNorm,
+    bloomIntensityScale: 0.65 + 0.35 * zoomNorm,
+    edgeThreshold: 0.14 + 0.10 * zoomNorm,
+    unitScale: lodTier === "strategic" ? 1.25 : 1
+  };
+}
+
+/** Importance order used by Pass 2; layers: terrain=0, building=1, unit=2, selection/VFX=3. */
+export function priorityForCellSample(layer: number, emissiveLuminance: number, buildingEdge: boolean): number {
+  if ((Number.isFinite(emissiveLuminance) && emissiveLuminance > 1) || layer === 3) return 4;
+  if (layer === 2) return 3;
+  if (layer === 1 && buildingEdge) return 2;
+  return 1;
+}
+
+/** Convert a high-resolution alpha mask into a 1-bit glyph with a right/bottom black gutter. */
+export function rasterizeMicroGlyph(
+  sourceAlpha: Uint8Array,
+  sourceWidth: number,
+  sourceHeight: number,
+  threshold = 160,
+  density: GlyphDensity = "medium"
+): Uint8Array {
+  if (!Number.isInteger(sourceWidth) || !Number.isInteger(sourceHeight) ||
+      sourceWidth <= 0 || sourceHeight <= 0 || sourceAlpha.length < sourceWidth * sourceHeight ||
+      sourceWidth % MICRO_GLYPH_CELL.width !== 0 || sourceHeight % MICRO_GLYPH_CELL.height !== 0) {
+    throw new RangeError("Micro-glyph source must be a complete 6×8 atlas cell grid.");
+  }
+  const output = new Uint8Array(MICRO_GLYPH_CELL.width * MICRO_GLYPH_CELL.height);
+  const cellScaleX = sourceWidth / MICRO_GLYPH_CELL.width;
+  const cellScaleY = sourceHeight / MICRO_GLYPH_CELL.height;
+  const [activeWidth, activeHeight] = microGlyphActiveSize(density);
+  for (let y = 0; y < activeHeight; y += 1) {
+    for (let x = 0; x < activeWidth; x += 1) {
+      const x0 = Math.floor(x * cellScaleX);
+      const y0 = Math.floor(y * cellScaleY);
+      const x1 = Math.floor((x + 1) * cellScaleX);
+      const y1 = Math.floor((y + 1) * cellScaleY);
+      let lit = false;
+      for (let sy = y0; sy < y1 && !lit; sy += 1) {
+        for (let sx = x0; sx < x1; sx += 1) {
+          if ((sourceAlpha[sy * sourceWidth + sx] ?? 0) >= threshold) {
+            lit = true;
+            break;
+          }
+        }
+      }
+      output[y * MICRO_GLYPH_CELL.width + x] = lit ? 255 : 0;
+    }
+  }
+  // Right and bottom gutters remain zero by construction.
+  return output;
 }
 
 export function quantizeLuminance(value: number): number {

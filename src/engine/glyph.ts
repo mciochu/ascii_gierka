@@ -1,6 +1,7 @@
 import { Container } from "pixi.js";
 
 export type GlyphMaterialKind = "terrain" | "building" | "unit" | "selection" | "vfx" | "utility";
+export type GlyphLod = "close" | "standard" | "strategic";
 
 export interface GlyphSpec {
   char: string;
@@ -20,6 +21,8 @@ export interface GlyphSpec {
   animated?: boolean;
   normal?: readonly [number, number, number];
   entityId?: string | number;
+  lod?: GlyphLod;
+  strategicGlyph?: string;
 }
 
 export interface GlyphInstanceRecord {
@@ -38,6 +41,8 @@ export interface GlyphInstanceRecord {
   material: GlyphMaterialKind | null;
   entityId: string | number | null;
   normal: readonly [number, number, number];
+  lod?: GlyphLod;
+  strategicGlyph?: string;
 }
 
 /**
@@ -61,6 +66,8 @@ export class GlyphDisplay extends Container {
   private readonly animated: boolean;
   private readonly normal: readonly [number, number, number];
   private readonly explicitEntityId: string | number | null;
+  private readonly lod?: GlyphLod;
+  private readonly strategicGlyph?: string;
   private _records: GlyphInstanceRecord[] = [];
   readonly style: { fill: string };
 
@@ -78,6 +85,8 @@ export class GlyphDisplay extends Container {
     this.animated = spec.animated ?? false;
     this.normal = spec.normal ?? [0, 0, 1];
     this.explicitEntityId = spec.entityId ?? null;
+    this.lod = spec.lod;
+    this.strategicGlyph = spec.strategicGlyph;
 
     const self = this;
     this.style = Object.defineProperty({}, "fill", {
@@ -148,7 +157,9 @@ export class GlyphDisplay extends Container {
       animated: this.animated,
       material: this.material,
       entityId: this.explicitEntityId,
-      normal: this.normal
+      normal: this.normal,
+      ...(this.lod ? { lod: this.lod } : {}),
+      ...(this.strategicGlyph ? { strategicGlyph: this.strategicGlyph } : {})
     }));
   }
 }

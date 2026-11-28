@@ -407,7 +407,7 @@ function makeStorehouse(parent: Container, x: number, y: number): Container {
   return group;
 }
 
-function makeUnit(parent: Container, x: number, y: number, variant: number): Container {
+function makeUnit(parent: Container, x: number, y: number, variant: number, count: number): Container {
   const group = new Container();
   parent.addChild(group);
   const offsets = variant === 0
@@ -415,19 +415,68 @@ function makeUnit(parent: Container, x: number, y: number, variant: number): Con
     : variant === 1
       ? [[-12, -9], [9, -12], [-2, 10]]
       : [[-18, 0], [0, -10], [18, 3], [5, 18]];
-  offsets.forEach(([ox, oy], index) => {
-    addGlyph(group, {
-      char: index === 1 && variant === 0 ? "♞" : "♟",
-      x: ox,
-      y: oy,
-      size: index === 1 ? 28 : 23,
-      color: variant === 3 ? "#f07869" : variant === 1 ? "#a5d6f1" : "#74c7f5",
-      stroke: "#263328",
-      strokeWidth: 1,
-      alpha: 0.96
+  const role = variant === 1 ? "archer" : variant === 2 ? "cavalry" : variant === 3 ? "raider" : "pikeman";
+  const tacticalGlyph = variant === 1 ? ")" : variant === 2 ? "m" : variant === 3 ? "*" : "█";
+  const closeSilhouette: Record<string, string[]> = {
+    pikeman: [" | ", "/|+", "|#|", "/|+", "/ +"],
+    archer: [" ) ", "/#)", "|#/", " / ", "/ #"],
+    cavalry: [" m ", "/|+", "|#|", "/|+", "v v"],
+    raider: [" ! ", "/#/", "|x|", "/|+", "/ +"]
+  };
+  const standardSilhouette: Record<string, string[]> = {
+    pikeman: [" |", "/#", "/ "],
+    archer: [")/", "/#", "/ "],
+    cavalry: ["m ", "/|", "v "],
+    raider: ["! ", "/#", "/ "]
+  };
+  const color = variant === 3 ? "#f07869" : variant === 1 ? "#a5d6f1" : "#74c7f5";
+  offsets.forEach(([ox, oy]) => {
+    closeSilhouette[role]!.forEach((row, rowIndex) => {
+      Array.from(row).forEach((character, columnIndex) => {
+        if (character === " ") return;
+        addGlyph(group, {
+          char: character,
+          x: ox + (columnIndex - 1) * 5,
+          y: oy + (rowIndex - 2) * 6.5,
+          size: 6,
+          color,
+          alpha: 0.98,
+          material: "unit",
+          height: 0.24,
+          lod: "close"
+        });
+      });
+    });
+    standardSilhouette[role]!.forEach((row, rowIndex) => {
+      Array.from(row).forEach((character, columnIndex) => {
+        if (character === " ") return;
+        addGlyph(group, {
+          char: character,
+          x: ox + (columnIndex - 0.5) * 7,
+          y: oy + (rowIndex - 1) * 8,
+          size: 8,
+          color,
+          alpha: 0.98,
+          material: "unit",
+          height: 0.24,
+          lod: "standard"
+        });
+      });
     });
   });
-  addGlyph(group, { char: "⚑", x: 0, y: -27, size: 16, color: variant === 3 ? "#f05252" : variant === 2 ? "#e4bd63" : "#75c9f3" });
+  addGlyph(group, {
+    char: tacticalGlyph, x: 0, y: 0, size: 24, color, weight: "bold",
+    alpha: 0.98, material: "unit", height: 0.24, lod: "strategic"
+  });
+  addGlyph(group, {
+    char: "[x" + count + "]", x: 18, y: -17, size: 14, color, weight: "bold",
+    alpha: 0.98, material: "unit", height: 0.24, lod: "strategic"
+  });
+  addGlyph(group, {
+    char: "⚑", x: 0, y: -27, size: 16,
+    color: variant === 3 ? "#f05252" : variant === 2 ? "#e4bd63" : "#75c9f3",
+    material: "unit", lod: "standard"
+  });
   group.position.set(x, y);
   return group;
 }
@@ -502,16 +551,16 @@ export function createWorld(root: Container): WorldState {
     addWord(layers.details, "JELENIE " + (index + 1), node.x, node.y + 20, 7, "#c2ad83", 0.72);
   }
 
-  const guard = makeUnit(layers.actors, 1090, 660, 0);
+  const guard = makeUnit(layers.actors, 1090, 660, 0, 12);
   entities.push(entity(guard, "guard", "Straż zamkowa", "unit", "Zawodowi obrońcy twierdzy. Utrzymują pozycję i czekają na rozkazy.", "PIKINIERZY · ODDZIAŁ", 1090, 660, 100, 12, "player", "pikemen"));
 
-  const archers = makeUnit(layers.actors, 1515, 825, 1);
+  const archers = makeUnit(layers.actors, 1515, 825, 1, 8);
   entities.push(entity(archers, "archers", "Łucznicy z doliny", "unit", "Lekka piechota dystansowa. Najskuteczniejsza na murach i w osłonie terenu.", "ŁUCZNICY · ODDZIAŁ", 1515, 825, 92, 8, "player", "archers"));
 
-  const riders = makeUnit(layers.actors, 775, 1300, 2);
+  const riders = makeUnit(layers.actors, 775, 1300, 2, 5);
   entities.push(entity(riders, "riders", "Zwiadowcy", "unit", "Ruchliwy oddział patrolowy. Może szybko dotrzeć do odległych części posiadłości.", "ZWIADOWCY · KONNI", 775, 1300, 100, 5, "player", "cavalry"));
 
-  const raiders = makeUnit(layers.actors, 2150, 1050, 3);
+  const raiders = makeUnit(layers.actors, 2150, 1050, 3, 9);
   entities.push(entity(raiders, "raiders", "Banda rozbójników", "unit", "Wrogi oddział grasujący przy trakcie. Czerwone sztandary oznaczają nieprzyjaciela.", "ROZBÓJNICY · WROGI ODDZIAŁ", 2150, 1050, 100, 9, "enemy", "raiders"));
 
   return { entities, layers, grid, setFlattened };

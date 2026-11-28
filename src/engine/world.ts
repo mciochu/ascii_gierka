@@ -199,7 +199,7 @@ function addRiver(parent: Container): void {
       x,
       y,
       size: 16 + rand() * 16,
-      color: rand() > 0.55 ? "#115475" : "#17658b",
+      color: rand() > 0.55 ? "#355d70" : "#477c91",
       alpha: 0.42 + rand() * 0.2,
       rotation: -0.22,
       material: "terrain", height: 0.02, animated: true, entityId: "terrain:water"
@@ -215,7 +215,7 @@ function addRiver(parent: Container): void {
       x,
       y,
       size: 7 + rand() * 9,
-      color: "#287b9b",
+      color: "#7094a0",
       alpha: 0.55,
       material: "terrain", height: 0.02, animated: true, entityId: "terrain:water"
     });
@@ -265,7 +265,7 @@ function addTerrain(layers: WorldLayers): void {
       x,
       y,
       size: 10 + rand() * 20,
-      color: rand() > 0.5 ? "#596977" : "#8494a2",
+      color: rand() > 0.5 ? "#625d4f" : "#8a8b7d",
       alpha: 0.35 + rand() * 0.35,
       rotation: rand() * 0.6
     });
@@ -301,7 +301,7 @@ function addGridTerrain(layers: WorldLayers, grid: WorldGrid): { glyph: GlyphDis
     stone: { char: "◈", color: "#aeb7b4", alpha: 0.74 },
     iron: { char: "◆", color: "#a65a3c", alpha: 0.78 },
     tar: { char: "◉", color: "#302b29", alpha: 0.78 },
-    moat: { char: "⌁", color: "#145a78", alpha: 0.8 }
+    moat: { char: "⌁", color: "#477c91", alpha: 0.8 }
   };
 
   for (const tile of grid.tiles) {
@@ -330,7 +330,7 @@ function addGridTerrain(layers: WorldLayers, grid: WorldGrid): { glyph: GlyphDis
         x: point.x,
         y: point.y + 8,
         size: 12,
-        color: "#46545e",
+        color: "#5c625b",
         alpha: 0.55,
         material: "terrain",
         height: Math.max(0, Math.min(1, tile.elevation / 4)) * 0.75,
@@ -346,31 +346,7 @@ function addGridTerrain(layers: WorldLayers, grid: WorldGrid): { glyph: GlyphDis
 function makeKeep(parent: Container, x: number, y: number): Container {
   const group = new Container();
   parent.addChild(group);
-  const rand = random(77);
-  for (let dx = -99; dx <= 99; dx += 14) {
-    addGlyph(group, { char: dx % 2 === 0 ? "━" : "═", x: dx + (rand() - 0.5) * 2, y: -67 + (rand() - 0.5) * 3, size: 20, color: "#c0c9d1", alpha: 0.95 });
-    addGlyph(group, { char: "━", x: dx + (rand() - 0.5) * 2, y: 68 + (rand() - 0.5) * 3, size: 20, color: "#9daab5", alpha: 0.9 });
-  }
-  for (let dy = -54; dy <= 54; dy += 13) {
-    addGlyph(group, {
-      char: "║", x: -103 + (rand() - 0.5) * 3, y: dy, size: 19, color: "#d4dde2",
-      normal: [-0.8, 0.0, 0.6], height: 0.76, material: "building"
-    });
-    addGlyph(group, {
-      char: "║", x: 103 + (rand() - 0.5) * 3, y: dy, size: 19, color: "#d4dde2",
-      normal: [0.8, 0.0, 0.6], height: 0.76, material: "building"
-    });
-  }
-  const towers = [[-103, -68], [103, -68], [-103, 68], [103, 68]];
-  for (const [tx, ty] of towers) {
-    addGlyph(group, { char: "▥", x: tx, y: ty, size: 39, color: "#d2dae0", weight: "bold", stroke: "#6d715c", strokeWidth: 1 });
-    addGlyph(group, { char: "╬", x: tx, y: ty - 20, size: 17, color: "#eff4f6" });
-  }
-  addGlyph(group, { char: "╧", x: 0, y: 67, size: 24, color: "#d2bd8c" });
-  addGlyph(group, { char: "▤", x: -33, y: -5, size: 61, color: "#ae794a", alpha: 0.78 });
-  addGlyph(group, { char: "▥", x: 24, y: -8, size: 55, color: "#c38b52", alpha: 0.82 });
-  addWord(group, "DONJON", 0, 26, 12, "#f2d18a", 0.78);
-  addWord(group, "CASTELLUM", 0, 91, 9, "#e0be7b", 0.77);
+  drawTeutonicAsset(group, "keep", 0, -4, { scale: 2.4, faction: "order", label: "DONŻON" });
   group.position.set(x, y);
   return group;
 }
@@ -378,15 +354,7 @@ function makeKeep(parent: Container, x: number, y: number): Container {
 function makeBarracks(parent: Container, x: number, y: number): Container {
   const group = new Container();
   parent.addChild(group);
-  addGlyph(group, { char: "╔", x: -38, y: -25, size: 25, color: "#bdc8d0" });
-  addGlyph(group, { char: "╗", x: 38, y: -25, size: 25, color: "#bdc8d0" });
-  addGlyph(group, { char: "╚", x: -38, y: 25, size: 25, color: "#bdc8d0" });
-  addGlyph(group, { char: "╝", x: 38, y: 25, size: 25, color: "#bdc8d0" });
-  for (let i = -2; i <= 2; i += 1) {
-    addGlyph(group, { char: "▤", x: i * 13, y: -24 + Math.sin(i) * 3, size: 19, color: "#a7794d" });
-  }
-  addWord(group, "KOSZARY", 0, 2, 10, "#e5bd70", 0.75);
-  addGlyph(group, { char: "⚑", x: 0, y: 21, size: 19, color: "#d79b53" });
+  drawTeutonicAsset(group, "barracks", 0, -3, { scale: 1.9, faction: "order", label: "KOSZARY" });
   group.position.set(x, y);
   return group;
 }
@@ -394,13 +362,7 @@ function makeBarracks(parent: Container, x: number, y: number): Container {
 function makeMill(parent: Container, x: number, y: number): Container {
   const group = new Container();
   parent.addChild(group);
-  addGlyph(group, { char: "╱", x: -20, y: -16, size: 35, color: "#c28a50" });
-  addGlyph(group, { char: "╲", x: 20, y: -16, size: 35, color: "#c28a50" });
-  addGlyph(group, { char: "╲", x: -20, y: 16, size: 35, color: "#98633e" });
-  addGlyph(group, { char: "╱", x: 20, y: 16, size: 35, color: "#98633e" });
-  addGlyph(group, { char: "✣", x: 0, y: 0, size: 37, color: "#e5c27a" });
-  addGlyph(group, { char: "│", x: 0, y: 26, size: 36, color: "#a06d43" });
-  addWord(group, "MŁYN", 0, 52, 9, "#e3b966", 0.8);
+  drawTeutonicAsset(group, "mill", 0, -3, { scale: 1.8, faction: "order", label: "MŁYN" });
   group.position.set(x, y);
   return group;
 }
@@ -408,11 +370,7 @@ function makeMill(parent: Container, x: number, y: number): Container {
 function makeStorehouse(parent: Container, x: number, y: number): Container {
   const group = new Container();
   parent.addChild(group);
-  for (const dx of [-28, -10, 10, 28]) {
-    addGlyph(group, { char: "▥", x: dx + (dx % 3), y: -3 + Math.sin(dx) * 2, size: 34, color: "#aab6bd" });
-  }
-  addGlyph(group, { char: "╧", x: 0, y: 18, size: 31, color: "#a6b3bd" });
-  addWord(group, "SPICHLERZ", 0, 39, 8, "#d8c28c", 0.73);
+  drawTeutonicAsset(group, "granary", 0, -3, { scale: 1.7, faction: "order", label: "SPICHLERZ" });
   group.position.set(x, y);
   return group;
 }
@@ -449,8 +407,12 @@ function makeUnit(
     swordsmen: "knight", cavalry: "cavalry", raiders: "sergeant", lord: "lord"
   };
   offsets.forEach(([ox, oy]) => {
+    const faction = team === "enemy" || variant === 3 ? "enemy" : "order";
     drawTeutonicAsset(group, unitArt[role] ?? "sergeant", ox, oy, {
-      scale: 1.12, faction: team === "enemy" || variant === 3 ? "enemy" : "order", lod: "close"
+      scale: 1.12, faction, lod: "close"
+    });
+    drawTeutonicAsset(group, unitArt[role] ?? "sergeant", ox, oy, {
+      scale: 0.9, faction, lod: "standard"
     });
   });
   addGlyph(group, {
@@ -558,9 +520,12 @@ export function createFortification(
     addGlyph(group, { char: "≈", x: 9, y: -3, size: 26, color: "#58b1d5", alpha: 0.86, material: "terrain" });
     addGlyph(group, { char: "·", x: 0, y: 8, size: 12, color: "#8ad8ec", alpha: 0.7, material: "terrain" });
   } else {
-    addGlyph(group, { char: visual.glyph, x: 0, y: 0, size: visual.size, color: visual.color, weight: "bold", alpha: 0.97, material: "building", height: kind === "wall-high" ? 0.85 : 0.55 });
-    if (kind === "wall-high") addGlyph(group, { char: "╥", x: 0, y: -17, size: 19, color: "#dbe3e7", alpha: 0.9, material: "building" });
-    if (kind === "gate-small" || kind === "gate-large") addGlyph(group, { char: "⚑", x: 0, y: -19, size: 16, color: "#e8c37d", alpha: 0.95 });
+    const isGate = kind === "gate-small" || kind === "gate-large";
+    drawTeutonicAsset(group, isGate ? "gate" : "wall", 0, 0, {
+      scale: kind === "wall-high" || kind === "gate-large" ? 1.25 : 0.95,
+      faction: "order"
+    });
+    if (kind === "wall-high") addGlyph(group, { char: "╥", x: 0, y: -17, size: 19, color: "#e0dfd0", alpha: 0.9, material: "building" });
   }
   group.position.set(point.x, point.y);
   const created = entity(

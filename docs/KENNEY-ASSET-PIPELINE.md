@@ -1,5 +1,3 @@
-[Reading 35 lines from start (total: 35 lines, 0 remaining)]
-
 # Kenney Medieval RTS → Unicode glyph pipeline
 
 ## Source and license
@@ -35,5 +33,3 @@ Current generated coverage:
 - Buildings without a visually suitable source asset retain their existing glyph representation instead of being assigned an unrelated sprite.
 
 The structure and unit atlas identifiers are kept stable so visual assignments can be refined without changing simulation or save data.
-
-[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

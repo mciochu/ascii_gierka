@@ -1,5 +1,3 @@
-[Reading 40 lines from start (total: 40 lines, 0 remaining)]
-
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -40,5 +38,3 @@ test("world buildings and combat squads render converted Kenney sprites through 
   assert.ok(helper.includes("addGlyph(parent"));
   assert.ok(helper.includes("No PNG, Canvas, texture, or sprite is used by the running game."));
 });
-
-[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

@@ -1,5 +1,3 @@
-[Reading 125 lines from start (total: 125 lines, 0 remaining)]
-
 #!/usr/bin/env node
 /**
  * Converts Kenney Medieval RTS PNG atlas sprites into colored Unicode glyph grids.
@@ -125,5 +123,3 @@ const source = [
 ].join("\n");
 fs.writeFileSync(outputPath, source + "\n");
 console.log(`Generated ${Object.keys(generated).length} sprites from ${sprites.length} atlas entries: ${outputPath}`);
-
-[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

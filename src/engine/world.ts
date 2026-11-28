@@ -1,5 +1,3 @@
-[Reading 847 lines from start (total: 847 lines, 0 remaining)]
-
 import { Container } from "pixi.js";
 import { addGlyph, addWord, GlyphDisplay, type GlyphLodSet } from "./glyph";
 import { addKenneySprite } from "./kenney-sprites";
@@ -847,5 +845,3 @@ export function createProductionBuilding(
   group.position.set(x, y);
   return entity(group, `${type}-${index}`, visual.name, "building", "Pracownicy wykonują cykl produkcyjny i pieszo dostarczają towary do właściwego magazynu.", visual.role, x, y, 100);
 }
-
-[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

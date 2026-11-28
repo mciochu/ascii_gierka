@@ -1,5 +1,3 @@
-[Reading 54 lines from start (total: 54 lines, 0 remaining)]
-
 import { addGlyph, glyphAdvance, type GlyphDisplay, type GlyphLodSet, type GlyphMaterialKind } from "./glyph";
 import { KENNEY_GLYPH_SPRITES } from "./kenney-sprites.generated";
 
@@ -54,5 +52,3 @@ export function addKenneySprite(
   }
   return output;
 }
-
-[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

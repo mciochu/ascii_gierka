@@ -83,6 +83,14 @@ test("otwarty dialog odcina skróty mapy, ale Escape zamyka okno", () => {
   assert.match(main, /if \(key === "escape" && !dialogOverlay\.hidden\)[\s\S]*?closeDialog\(\);[\s\S]*?return;[\s\S]*?if \(!dialogOverlay\.hidden\) return;/);
 });
 
+test("kamera udostępnia pełny widok strategiczny i nie ucina zoomu poniżej 15%", () => {
+  assert.match(main, /const MIN_CAMERA_ZOOM = 0\.15/);
+  assert.match(main, /const MAX_CAMERA_ZOOM = 2\.0/);
+  assert.match(main, /Math\.max\(MIN_CAMERA_ZOOM, Math\.min\(MAX_CAMERA_ZOOM, nextZoom\)\)/);
+  assert.match(main, /zoom = Math\.max\(MIN_CAMERA_ZOOM, Math\.min\(MAX_CAMERA_ZOOM, bookmark\.zoom\)\)/);
+  assert.match(main, /if \(zoom <= 0\.68\)[\s\S]*?worldRoot\.position\.set\(rect\.width \/ 2, rect\.height \/ 2\)/);
+});
+
 test("HUD i zmiana rozmiaru zachowują punkt obserwacji kamery", () => {
   assert.match(main, /function preserveCameraCenter\(/);
   assert.match(main, /function toggleHud\(\): void \{[\s\S]*?preserveCameraCenter\(/);

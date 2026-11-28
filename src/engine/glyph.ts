@@ -1,6 +1,6 @@
 import { Container } from "pixi.js";
 
-export type GlyphMaterialKind = "terrain" | "building" | "unit" | "selection" | "vfx" | "utility";
+export type GlyphMaterialKind = "terrain" | "building" | "unit" | "selection" | "vfx" | "utility" | "overview";
 export type GlyphLod = "close" | "standard" | "strategic";
 export type GlyphLodSet = GlyphLod | readonly GlyphLod[];
 

@@ -77,11 +77,11 @@ function insideWorldDiamond(x: number, y: number): boolean {
 function addTree(parent: Container, x: number, y: number, scale: number, seed: number): void {
   const rand = random(seed);
   const canopy = ["♣", "♧", "♠", "❧"];
-  const greens = ["#354f35", "#496842", "#66804f", "#3d5d3c", "#7d8951"];
-  const count = 4 + Math.floor(rand() * 3);
+  const greens = ["#293e2d", "#3c5637", "#526b43", "#405d3c", "#718052", "#87915d"];
+  const count = 6 + Math.floor(rand() * 4);
   for (let i = 0; i < count; i += 1) {
     const angle = rand() * Math.PI * 2;
-    const radius = rand() * 17 * scale;
+    const radius = rand() * 22 * scale;
     const leafX = x + Math.cos(angle) * radius;
     const leafY = y + Math.sin(angle) * radius;
     if (!insideWorldDiamond(leafX, leafY)) continue;
@@ -89,7 +89,7 @@ function addTree(parent: Container, x: number, y: number, scale: number, seed: n
       char: canopy[Math.floor(rand() * canopy.length)] ?? "♣",
       x: leafX,
       y: leafY,
-      size: (18 + rand() * 13) * scale,
+      size: (15 + rand() * 15) * scale,
       color: greens[Math.floor(rand() * greens.length)] ?? "#547c50",
       alpha: 0.78 + rand() * 0.2,
       rotation: (rand() - 0.5) * 0.35
@@ -100,7 +100,7 @@ function addTree(parent: Container, x: number, y: number, scale: number, seed: n
     x: x + (rand() - 0.5) * 5,
     y: y + 15 * scale,
     size: 12 * scale,
-    color: "#805b3d",
+    color: "#63462f",
     alpha: 0.8
   });
   if (rand() > 0.48) {
@@ -119,7 +119,7 @@ function addTree(parent: Container, x: number, y: number, scale: number, seed: n
 
 function addForest(parent: Container, centerX: number, centerY: number, radiusX: number, radiusY: number, seed: number): void {
   const rand = random(seed);
-  const count = 13 + Math.floor(rand() * 10);
+  const count = 22 + Math.floor(rand() * 15);
   for (let i = 0; i < count; i += 1) {
     const angle = rand() * Math.PI * 2;
     const distance = Math.sqrt(rand());
@@ -136,7 +136,7 @@ function addForest(parent: Container, centerX: number, centerY: number, radiusX:
       x,
       y,
       size: 8 + rand() * 9,
-      color: "#60784b",
+      color: "#536a43",
       alpha: 0.6
     });
   }
@@ -158,7 +158,7 @@ function addQuadraticPath(parent: Container, start: { x: number; y: number }, co
       x: pointX,
       y: pointY,
       size: 10 + rand() * 8,
-      color: rand() > 0.5 ? "#171b20" : "#20242a",
+      color: rand() > 0.5 ? "#3b3428" : "#514532",
       alpha: 0.42 + rand() * 0.25
     });
   }
@@ -225,7 +225,7 @@ function addRiver(parent: Container): void {
 function addTerrain(layers: WorldLayers): void {
   const rand = random(1204);
   const grass = ["·", "˙", "‚", "⁙", "⸱", "∙", "'", "٫"];
-  const sands = ["#171713", "#1c1b16", "#211e18", "#191a15", "#242018"];
+  const sands = ["#172017", "#1b2419", "#222a1d", "#171f18", "#282a1e", "#24261d"];
   let placed = 0;
   let attempts = 0;
   while (placed < 680 && attempts < 5000) {
@@ -292,14 +292,14 @@ function addTerrain(layers: WorldLayers): void {
 function addGridTerrain(layers: WorldLayers, grid: WorldGrid): { glyph: GlyphDisplay; rise: number }[] {
   const elevationMarks: { glyph: GlyphDisplay; rise: number }[] = [];
   const symbols: Record<string, { char: string; color: string; alpha: number }> = {
-    sand: { char: "·", color: "#6b5940", alpha: 0.34 },
+    sand: { char: "·", color: "#63553e", alpha: 0.32 },
     oasis: { char: "❧", color: "#60784b", alpha: 0.62 },
-    forest: { char: "♣", color: "#36553a", alpha: 0.68 },
+    forest: { char: "♣", color: "#3f5b39", alpha: 0.72 },
     water: { char: "≈", color: "#477c91", alpha: 0.72 },
-    hill: { char: "﹏", color: "#514735", alpha: 0.5 },
-    cliff: { char: "▲", color: "#8a8b7d", alpha: 0.76 },
-    stone: { char: "◈", color: "#aeb7b4", alpha: 0.74 },
-    iron: { char: "◆", color: "#a65a3c", alpha: 0.78 },
+    hill: { char: "﹏", color: "#625239", alpha: 0.52 },
+    cliff: { char: "▲", color: "#817d6b", alpha: 0.76 },
+    stone: { char: "◈", color: "#a7a89c", alpha: 0.74 },
+    iron: { char: "◆", color: "#a45a3d", alpha: 0.78 },
     tar: { char: "◉", color: "#302b29", alpha: 0.78 },
     moat: { char: "⌁", color: "#477c91", alpha: 0.8 }
   };
@@ -346,7 +346,7 @@ function addGridTerrain(layers: WorldLayers, grid: WorldGrid): { glyph: GlyphDis
 function makeKeep(parent: Container, x: number, y: number): Container {
   const group = new Container();
   parent.addChild(group);
-  drawTeutonicAsset(group, "keep", 0, -4, { scale: 2.4, faction: "order", label: "DONŻON" });
+  drawTeutonicAsset(group, "keep", 0, -4, { scale: 1.0, faction: "order", label: "DONŻON" });
   group.position.set(x, y);
   return group;
 }
@@ -354,7 +354,7 @@ function makeKeep(parent: Container, x: number, y: number): Container {
 function makeBarracks(parent: Container, x: number, y: number): Container {
   const group = new Container();
   parent.addChild(group);
-  drawTeutonicAsset(group, "barracks", 0, -3, { scale: 1.9, faction: "order", label: "KOSZARY" });
+  drawTeutonicAsset(group, "barracks", 0, -3, { scale: 1.12, faction: "order", label: "KOSZARY" });
   group.position.set(x, y);
   return group;
 }
@@ -362,7 +362,7 @@ function makeBarracks(parent: Container, x: number, y: number): Container {
 function makeMill(parent: Container, x: number, y: number): Container {
   const group = new Container();
   parent.addChild(group);
-  drawTeutonicAsset(group, "mill", 0, -3, { scale: 1.8, faction: "order", label: "MŁYN" });
+  drawTeutonicAsset(group, "mill", 0, -3, { scale: 1.25, faction: "order", label: "MŁYN" });
   group.position.set(x, y);
   return group;
 }
@@ -370,7 +370,7 @@ function makeMill(parent: Container, x: number, y: number): Container {
 function makeStorehouse(parent: Container, x: number, y: number): Container {
   const group = new Container();
   parent.addChild(group);
-  drawTeutonicAsset(group, "granary", 0, -3, { scale: 1.7, faction: "order", label: "SPICHLERZ" });
+  drawTeutonicAsset(group, "granary", 0, -3, { scale: 1.18, faction: "order", label: "SPICHLERZ" });
   group.position.set(x, y);
   return group;
 }
@@ -399,9 +399,9 @@ function makeUnit(
     cavalry: "m", raiders: "*", lord: "♛"
   };
   const palette = team === "enemy" || variant === 3
-    ? "#f07869"
-    : role === "archers" || role === "crossbowmen" ? "#a5d6f1"
-      : role === "lord" ? "#e5c987" : "#74c7f5";
+    ? "#a63832"
+    : role === "archers" || role === "crossbowmen" ? "#d1b16e"
+      : role === "lord" ? "#eee4c9" : "#c5cbc5";
   const unitArt: Record<string, TeutonicAssetKind> = {
     archers: "archer", crossbowmen: "crossbowman", pikemen: "spearman",
     swordsmen: "knight", cavalry: "cavalry", raiders: "sergeant", lord: "lord"
@@ -409,10 +409,10 @@ function makeUnit(
   offsets.forEach(([ox, oy]) => {
     const faction = team === "enemy" || variant === 3 ? "enemy" : "order";
     drawTeutonicAsset(group, unitArt[role] ?? "sergeant", ox, oy, {
-      scale: 1.12, faction, lod: "close"
+      scale: 0.44, faction, lod: "close"
     });
     drawTeutonicAsset(group, unitArt[role] ?? "sergeant", ox, oy, {
-      scale: 0.9, faction, lod: "standard"
+      scale: 0.35, faction, lod: "standard"
     });
   });
   addGlyph(group, {
@@ -424,8 +424,16 @@ function makeUnit(
     alpha: 0.98, material: "unit", height: 0.24, lod: "strategic", minScreenCells: [1, 1]
   });
   addGlyph(group, {
-    char: "⚑", x: 0, y: -27, size: 16,
-    color: team === "enemy" || variant === 3 ? "#f05252" : role === "lord" ? "#e5c987" : "#75c9f3",
+    char: "|", x: 23, y: -34, size: 23, color: "#a8794d",
+    material: "unit", lod: "standard"
+  });
+  addGlyph(group, {
+    char: "⚑", x: 29, y: -43, size: 18,
+    color: team === "enemy" || variant === 3 ? "#96372f" : "#eee9d9",
+    material: "unit", lod: "standard"
+  });
+  if (team !== "enemy" && variant !== 3) addGlyph(group, {
+    char: "✠", x: 29, y: -43, size: 8, color: "#191c19",
     material: "unit", lod: "standard"
   });
   group.position.set(x, y);
@@ -440,16 +448,16 @@ function setGlyphTreeLod(node: Container, lod: GlyphLodSet): void {
 }
 
 function strategicBuildingGlyph(id: string): { char: string; color: string } {
-  if (id === "keep") return { char: "K", color: "#e5c987" };
-  if (id === "barracks") return { char: "B", color: "#b9d1e5" };
+  if (id === "keep") return { char: "K", color: "#d1b16e" };
+  if (id === "barracks") return { char: "B", color: "#d1d0c3" };
   if (id === "mill") return { char: "M", color: "#d7bd85" };
   if (id === "storehouse" || id.startsWith("granary")) return { char: "S", color: "#cdbb8b" };
-  if (id.startsWith("stockpile")) return { char: "▣", color: "#b9c9cf" };
+  if (id.startsWith("stockpile")) return { char: "▣", color: "#b4b8aa" };
   if (id.startsWith("armory")) return { char: "A", color: "#c6a9a0" };
-  if (id.startsWith("watchtower")) return { char: "T", color: "#b9d1e5" };
-  if (id.startsWith("market")) return { char: "$", color: "#e5c987" };
+  if (id.startsWith("watchtower")) return { char: "T", color: "#d1d0c3" };
+  if (id.startsWith("market")) return { char: "$", color: "#d1b16e" };
   if (id.startsWith("quarry")) return { char: "Q", color: "#b8b8b0" };
-  if (id.startsWith("woodcutter") || id.startsWith("hunter")) return { char: "W", color: "#8fc58c" };
+  if (id.startsWith("woodcutter") || id.startsWith("hunter")) return { char: "W", color: "#87966b" };
   if (id.startsWith("iron-mine")) return { char: "I", color: "#aebac7" };
   if (id.startsWith("pitch")) return { char: "P", color: "#b6a2c9" };
   if (id.startsWith("hovel")) return { char: "H", color: "#cda77f" };
@@ -512,13 +520,13 @@ export function createFortification(
     "wall-low": { name: "Mur niski", glyph: "▥", color: "#9daeb7", size: 29, health: 240 },
     "gate-small": { name: "Brama mała", glyph: "╫", color: "#c5a36d", size: 36, health: 320 },
     "gate-large": { name: "Brama duża", glyph: "╬", color: "#d2ae72", size: 44, health: 420 },
-    moat: { name: "Fosa", glyph: "≈", color: "#4b9fc5", size: 37, health: 200 }
+    moat: { name: "Fosa", glyph: "≈", color: "#577f89", size: 37, health: 200 }
   };
   const visual = visuals[kind];
   if (kind === "moat") {
-    addGlyph(group, { char: "≈", x: -9, y: 1, size: 26, color: "#317da2", alpha: 0.9, material: "terrain" });
-    addGlyph(group, { char: "≈", x: 9, y: -3, size: 26, color: "#58b1d5", alpha: 0.86, material: "terrain" });
-    addGlyph(group, { char: "·", x: 0, y: 8, size: 12, color: "#8ad8ec", alpha: 0.7, material: "terrain" });
+    addGlyph(group, { char: "≈", x: -9, y: 1, size: 26, color: "#416f7b", alpha: 0.9, material: "terrain" });
+    addGlyph(group, { char: "≈", x: 9, y: -3, size: 26, color: "#628b93", alpha: 0.86, material: "terrain" });
+    addGlyph(group, { char: "·", x: 0, y: 8, size: 12, color: "#d1d0c3", alpha: 0.7, material: "terrain" });
   } else {
     const isGate = kind === "gate-small" || kind === "gate-large";
     drawTeutonicAsset(group, isGate ? "gate" : "wall", 0, 0, {
@@ -668,7 +676,7 @@ export function createWorld(root: Container): WorldState {
 export function createWatchtower(parent: Container, x: number, y: number, index: number): GameEntity {
   const group = new Container();
   parent.addChild(group);
-  drawTeutonicAsset(group, "watchtower", 0, -4, { scale: 1.55, faction: "order", label: "WIEŻA" });
+  drawTeutonicAsset(group, "watchtower", 0, -4, { scale: 1.12, faction: "order", label: "WIEŻA" });
   group.position.set(x, y);
   return entity(group, `watchtower-${index}`, "Wieża strażnicza", "building", "Posterunek obserwacyjny nad traktem. Zwiększa kontrolę nad okolicą i ostrzega przed zagrożeniem.", "OBRONA · POSTERUNEK", x, y, 100);
 }
@@ -702,7 +710,7 @@ export function createTownBuilding(
     inn: "inn", good: "garden", bad: "gallows"
   };
   drawTeutonicAsset(group, townArt[type], 0, -4, {
-    scale: type === "cathedral" ? 1.65 : 1.35,
+    scale: type === "cathedral" ? 1.0 : 0.95,
     faction: type === "good" || type === "bad" ? "neutral" : "order",
     label: visual.label
   });
@@ -740,7 +748,7 @@ export function createStorageBuilding(
     stockpile: "stockpile", granary: "granary", armory: "armory"
   };
   drawTeutonicAsset(group, storageArt[type], 0, -4, {
-    scale: 1.35, faction: "order", label: module ? "MODUŁ" : visual.label
+    scale: 0.95, faction: "order", label: module ? "MODUŁ" : visual.label
   });
   if (module) addGlyph(group, { char: "╫", x: 0, y: 12, size: 24, color: "#b9a16e", alpha: 0.9 });
   group.position.set(x, y);
@@ -787,13 +795,13 @@ export function createProductionBuilding(
   const visual = visuals[type];
   const productionArt: Record<LogisticsBuildingType, TeutonicAssetKind> = {
     woodcutter: "woodcutter", quarry: "quarry", "iron-mine": "mine", "pitch-worker": "pitch",
-    "apple-orchard": "orchard", hunter: "woodcutter", "dairy-farm": "farm",
-    "wheat-farm": "farm", "hop-farm": "farm", mill: "mill", bakery: "bakery",
-    brewery: "brewery", bowyer: "smithy", poleturner: "smithy", blacksmith: "smithy",
-    tanner: "tannery", armourer: "smithy", "ox-tether": "stables", market: "market"
+    "apple-orchard": "orchard", hunter: "hunter", "dairy-farm": "dairy-farm",
+    "wheat-farm": "wheat-farm", "hop-farm": "hop-farm", mill: "mill", bakery: "bakery",
+    brewery: "brewery", bowyer: "bowyer", poleturner: "poleturner", blacksmith: "smithy",
+    tanner: "tannery", armourer: "armourer", "ox-tether": "ox-tether", market: "market"
   };
   drawTeutonicAsset(group, productionArt[type], 0, -4, {
-    scale: 1.32, faction: "order", label: visual.name.toLocaleUpperCase("pl-PL").slice(0, 13)
+    scale: 0.94, faction: "order", label: visual.name.toLocaleUpperCase("pl-PL").slice(0, 13)
   });
   group.position.set(x, y);
   return entity(group, `${type}-${index}`, visual.name, "building", "Pracownicy wykonują cykl produkcyjny i pieszo dostarczają towary do właściwego magazynu.", visual.role, x, y, 100);

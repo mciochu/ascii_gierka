@@ -32,5 +32,3 @@ test("world uses the Teutonic glyph asset pipeline instead of generic sprite ass
   assert.ok(art.includes('char: "✠"'));
   assert.ok(!world.includes("addKenneySprite"));
 });
-
-[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

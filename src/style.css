@@ -510,5 +510,3 @@ body, #app, .game-shell, .map-column, #map-viewport { background: #050504; }
 .effulgence-options select { background: #100c09; border-color: #64462f; color: #e4d8bd; }
 .effulgence-options output { color: #d3b36c; }
 .effulgence-toggle { color: #e0d1b3; } .effulgence-toggle input { accent-color: #a63832; }
-
-[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

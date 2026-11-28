@@ -6,7 +6,7 @@ A browser-based medieval real-time strategy game built entirely from individuall
 
 The world uses a top-down camera and a freeform typographic renderer. It is not a terminal grid and it is not a screenshot made from text rows: every visible terrain mark, tree, wall, building detail, soldier and effect is a text glyph with its own world position, size, colour, opacity, rotation and animation state.
 
-The visual language is inspired by medieval strategy games such as Stronghold Crusader: castle building, village economy, armies, sieges and rival lords.
+The visual direction is a northern-European medieval world inspired by the Teutonic Order and the Polish–Teutonic frontier: brick-and-limestone castles, timber villages, white mantles with black crosses, red heraldic details, guild workshops, abbeys, banners and medieval field armies. The game keeps its Stronghold-style economy and siege-strategy systems, but the art identity is now distinctly Teutonic rather than generic Crusader desert fantasy.
 
 **No image assets, sprite sheets, SVG illustrations, 3D models or bitmap artwork are used for the game world.** The renderer draws Unicode characters through PixiJS.
 
@@ -81,3 +81,5 @@ bash /home/ubuntu/services/ascii_gierka/bin/install-autostart.sh
 ```
 
 Logs are stored in `/home/ubuntu/services/ascii_gierka/logs/`. The watcher and static server are independent of Karcianka.
+
+[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

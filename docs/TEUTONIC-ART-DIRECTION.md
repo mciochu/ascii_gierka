@@ -73,5 +73,3 @@ The interface uses the same visual language as the map: near-black iron panels, 
 4. TypeScript, unit tests and production build pass.
 5. Existing save files, entity IDs, simulation rules and input controls remain unchanged.
 6. Visual QA at wide desktop and narrow mobile widths; check close, standard and strategic zoom.
-
-[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

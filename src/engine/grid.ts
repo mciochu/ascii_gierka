@@ -161,6 +161,63 @@ export function createWorldGrid(): WorldGrid {
   };
 }
 
+export interface TerrainOverviewCell {
+  x: number;
+  y: number;
+  terrain: TerrainKind;
+  elevation: number;
+  coverage: number;
+}
+
+/**
+ * Collapse the simulation grid into a readable strategic map. One overview
+ * cell represents a block of terrain tiles, preventing thousands of tiny marks
+ * from merging into visual noise when the camera is far away.
+ */
+export function createTerrainOverview(grid: WorldGrid, blockSize = 6): TerrainOverviewCell[] {
+  if (!Number.isInteger(blockSize) || blockSize < 2 || blockSize > 25) {
+    throw new RangeError("Terrain overview block size must be an integer from 2 to 25.");
+  }
+
+  const overview: TerrainOverviewCell[] = [];
+  for (let rowStart = 0; rowStart < grid.rows; rowStart += blockSize) {
+    for (let colStart = 0; colStart < grid.columns; colStart += blockSize) {
+      const counts = new Map<TerrainKind, number>();
+      let total = 0;
+      let elevationTotal = 0;
+      for (let row = rowStart; row < Math.min(grid.rows, rowStart + blockSize); row += 1) {
+        for (let col = colStart; col < Math.min(grid.columns, colStart + blockSize); col += 1) {
+          const tile = grid.tiles[row * grid.columns + col];
+          if (!tile) continue;
+          counts.set(tile.terrain, (counts.get(tile.terrain) ?? 0) + 1);
+          elevationTotal += tile.elevation;
+          total += 1;
+        }
+      }
+      if (total === 0) continue;
+
+      const feature = [...counts.entries()]
+        .filter(([terrain]) => terrain !== "sand")
+        .sort((a, b) => b[1] - a[1])[0];
+      const terrain = feature && feature[1] >= Math.max(2, Math.ceil(total * 0.1))
+        ? feature[0]
+        : "sand";
+      const centerCol = Math.min(grid.columns - 1, colStart + Math.floor(Math.min(blockSize, grid.columns - colStart) / 2));
+      const centerRow = Math.min(grid.rows - 1, rowStart + Math.floor(Math.min(blockSize, grid.rows - rowStart) / 2));
+      const center = worldPositionForCell(grid, centerCol, centerRow);
+      if (!center) continue;
+      overview.push({
+        x: center.x,
+        y: center.y,
+        terrain,
+        elevation: elevationTotal / total,
+        coverage: (counts.get(terrain) ?? 0) / total
+      });
+    }
+  }
+  return overview;
+}
+
 export function tileAt(grid: WorldGrid, col: number, row: number): GridTile | null {
   if (col < 0 || row < 0 || col >= grid.columns || row >= grid.rows) return null;
   return grid.tiles[row * grid.columns + col] ?? null;

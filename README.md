@@ -81,5 +81,3 @@ bash /home/ubuntu/services/ascii_gierka/bin/install-autostart.sh
 ```
 
 Logs are stored in `/home/ubuntu/services/ascii_gierka/logs/`. The watcher and static server are independent of Karcianka.
-
-[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

@@ -276,3 +276,25 @@ test('prędkość jest ograniczona do 20–90, a miesiąc nalicza się po 30 sek
   assert.equal(advanceSimulation(state, 1).length, 1);
   assert.equal(state.month, 2);
 });
+
+test("historia księgi raportów przechowuje maksymalnie 12 rzeczywistych rozliczeń", () => {
+  const state = createSimulation();
+  setGameSpeed(state, 40);
+  for (let month = 0; month < 15; month += 1) {
+    advanceSimulation(state, 30);
+  }
+  assert.equal(state.month, 16);
+  assert.equal(state.monthlyHistory.length, 12);
+  assert.equal(state.monthlyHistory[0].month, 5);
+  assert.equal(state.monthlyHistory.at(-1).month, 16);
+  for (const entry of state.monthlyHistory) {
+    assert.ok(Number.isFinite(entry.foodConsumed));
+    assert.ok(Number.isFinite(entry.popularityChange));
+    assert.ok(Array.isArray(entry.messages));
+  }
+});
+
+test("nowy zapis symulacji rozpoczyna pustą historię miesięczną", () => {
+  const state = createSimulation();
+  assert.deepEqual(state.monthlyHistory, []);
+});

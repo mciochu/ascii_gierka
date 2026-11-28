@@ -24,12 +24,12 @@ export const BUILD_CATEGORIES: BuildCategory[] = [
     description: "Fortyfikacje, wieże i infrastruktura obronna.",
     items: [
       { id: "watchtower", name: "Wieża strażnicza", glyph: "▥", cost: "70 drewna · 30 kamienia", implemented: true, note: "Dostępna budowa prototypowej wieży strażniczej." },
-      { id: "wall-high", name: "Mur wysoki", glyph: "▤", note: unavailable },
-      { id: "wall-low", name: "Mur niski", glyph: "▥", note: unavailable },
+      { id: "wall-high", name: "Mur wysoki", glyph: "▤", cost: "5 drewna · 20 kamienia", implemented: true, note: "Blokuje ruch na polu siatki; wysoka, wytrzymała fortyfikacja." },
+      { id: "wall-low", name: "Mur niski", glyph: "▥", cost: "3 drewna · 12 kamienia", implemented: true, note: "Niższa fortyfikacja blokująca przejście piesze." },
       { id: "stairs", name: "Schody", glyph: "╱", note: unavailable },
       { id: "crenellations", name: "Blanki", glyph: "▦", note: unavailable },
-      { id: "gate-small", name: "Brama mała", glyph: "▥", note: unavailable },
-      { id: "gate-large", name: "Brama duża", glyph: "▥", note: unavailable },
+      { id: "gate-small", name: "Brama mała", glyph: "▥", cost: "10 drewna · 12 kamienia", implemented: true, note: "Zamykana brama blokuje lub dopuszcza ruch przez pole." },
+      { id: "gate-large", name: "Brama duża", glyph: "▥", cost: "15 drewna · 18 kamienia", implemented: true, note: "Szeroka brama z możliwością otwierania i zamykania." },
       { id: "drawbridge", name: "Most zwodzony", glyph: "╫", note: unavailable },
       { id: "towers", name: "Wieże (5 rozmiarów)", glyph: "♜", note: unavailable },
       { id: "barracks", name: "Koszary", glyph: "▤", note: unavailable },
@@ -43,7 +43,7 @@ export const BUILD_CATEGORIES: BuildCategory[] = [
       { id: "wolf-pit", name: "Wilcze doły", glyph: "⌄", note: unavailable },
       { id: "braizer", name: "Koksownik", glyph: "♨", note: unavailable },
       { id: "oil-cauldron", name: "Kocioł z olejem", glyph: "♨", note: unavailable },
-      { id: "moat-plan", name: "Wyznaczanie fosy", glyph: "⌁", note: unavailable }
+      { id: "moat-plan", name: "Wyznaczenie fosy (prototyp)", glyph: "⌁", cost: "0 surowców", implemented: true, note: "Natychmiast oznacza pole jako nieprzechodnie. Nie symuluje jeszcze pracy kopaczy ani zasypywania." }
     ]
   },
   {

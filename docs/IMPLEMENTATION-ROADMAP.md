@@ -294,8 +294,8 @@ Ta faza zastępuje wcześniejszy tymczasowy renderer filtrów oraz wcześniejszy
 
 - Pełna paleta ośmiu frakcji oraz komplet materiałów, limitów `L_max`, obrysów i animacji terenu (w tym planowana/wykopana fosa, bąble smoły, drzewa i jelenie).
 - Wizualny FSM wszystkich budynków: pracujący, bez pracownika, pauza, blokada magazynu/surowca, uszkodzenia HP, pożar i rozpad; pełne detale murów, bram, mostów, machin i stosów magazynowych.
-- Pełny roster europejski/arabski/specjalistyczny, machiny oblężnicze, stacking, paski HP, hit-flash `65 ms` i rozpad śmierci `400 ms`.
-- Osobne stany i krzywe VFX strzał, strzał ogniowych, głazów, cienia, pożaru, wrzącego oleju, krowy/zarazy, gaszenia i zawalenia muru.
+- Pełny roster europejski/arabski/specjalistyczny, machiny oblężnicze, pociski artyleryjskie/ogniste, stacking, paski HP, hit-flash `65 ms` i rozpad śmierci `400 ms`.
+- Dodatkowe stany i krzywe VFX strzał ogniowych, głazów, cienia, pożaru, wrzącego oleju, krowy/zarazy, gaszenia i zawalenia muru. Podstawowe ASCII-strzały i bełty mają już lot i opóźnione obrażenia.
 - Pełny HUD zgodny z dokumentem: księga raportów z 12 miesiącami, dyplomacja, alerty, komplet kursorów, rozetowe sterowanie PPM i pozostałe szczegółowe panele kontekstowe.
 - Testy akceptacyjne obrazu, w tym test luki w murze, rozróżnianie siedmiu typów terenu i bitwa stresowa `100` łuczników + `50` niewolników + `30` pól smoły + `3` katapulty z krowami. Nie ma jeszcze pomiaru stałych `60 FPS` na zintegrowanym GPU.
 
@@ -359,3 +359,48 @@ Ta faza wdraża pięć mechanizmów z dokumentu Wklejony tekst(20261128-000418).
 - Promień trafienia jednostki jest wyliczany w świecie jako ekranowe 14 px podzielone przez zoom. Zasięg kliknięcia pozostaje więc stały na ekranie przy 0.5×, 1.0× i 2.0×; rozmiar modelu i klikalność nie są już zależne wyłącznie od skali świata.
 - Budynki zachowują istniejącą sylwetkę w trybie standard i close. Przy zoomie strategicznym ich detale są zastępowane pojedynczym glifem rozpoznawczym (m.in. K — donżon, B — koszary, M — młyn, S — spichlerz, T — wieża, litery obiektów gospodarczych).
 - Weryfikacja uzupełnienia: testy konwersji fizycznych komórek na logiczne piksele HiDPI, niezmiennego ekranowego hitboxu dla trzech poziomów zoomu, trzech LOD jednostek i LOD budowli.
+
+
+## Bieżące uzupełnienie — system walki, fortyfikacje i raporty (2026-11-28)
+
+Ta notatka aktualizuje status etapów 2, 5 i 6 po dalszej implementacji. Nie zastępuje wymagań z wcześniejszych etapów i nie oznacza, że cała gra jest ukończona.
+
+### Działające elementy dodane w tej iteracji
+
+**Lordowie i rozstrzygnięcie bitwy**
+- Świat zawiera Lorda gracza i Lorda przeciwnika jako odrębne jednostki z własnym HP, ruchem i samoobroną.
+- Śmierć Lorda gracza powoduje porażkę; śmierć wrogiego Lorda przy żywym własnym powoduje zwycięstwo; jednoczesna śmierć to remis.
+- Wynik zatrzymuje symulację, blokuje ponowne wznowienie i jest zachowywany w lokalnym zapisie.
+- Stare zapisy formatu v1 bez pól Lordów otrzymują domyślnych Lordów podczas migracji. Zapis nadal ma wersję 1, a nowe właściwości są opcjonalne.
+
+**Rekrutacja**
+- Panel Koszar oferuje pikinierów, łuczników, kuszników i szermierzy.
+- Każda klasa wymaga jednej sztuki odpowiedniej, gotowej broni w fizycznej Zbrojowni oraz jednego bezrobotnego mieszkańca.
+- Rekrutacja tworzy jednostkę w wolnym, osiągalnym polu w pobliżu Koszar i zużywa odpowiedni zapas. Nie wprowadza ceny złota, ponieważ nie ma jej zdefiniowanej w tabeli projektu.
+
+**Fortyfikacje**
+- Wysokie/niskie mury, małe/duże bramy i fosa mogą być umieszczane na wolnych polach siatki.
+- Zajęte pole blokuje ruch i nowe trasy; zamknięta brama blokuje, a otwarta przywraca przejście. Usunięcie/zniszczenie obiektu przywraca zapamiętany naturalny typ terenu i jego przechodniość.
+- Odcinki murów mogą przylegać do siebie. Koszty drewna/kamienia pozostają prototypowymi parametrami strojenia w module fortifications, nie wartościami potwierdzonymi przez źródłową specyfikację.
+- Wieża strażnicza ostrzeliwuje najbliższy osiągalny cel w promieniu 280 jednostek świata, zadając 12 obrażeń co 1,2 s. To automatyczna obrona bez osobnego wizualnego pocisku.
+- Łucznicy i kusznicy wysyłają widoczne pociski ASCII (strzała/bełt) z czasem lotu zależnym od dystansu; obrażenia są naliczane po dotarciu, a pocisk znika po śmierci celu.
+
+**Raporty i wynik**
+- Księga przechowuje dwanaście ostatnich rzeczywistych rozliczeń miesięcznych: zmianę popularności, żywność, podatki/łapówkę oraz populację i bezrobotnych.
+- Historia jest częścią zapisu; zapis historyczny bez tego pola rozpoczyna pustą historię, a nieprawidłowe wpisy są odrzucane.
+- Tabela wyników pokazuje bieżącą siłę wojsk i przeżycie Lordów. Nie prezentuje skarbca/populacji wroga, ponieważ taka gospodarka jeszcze nie istnieje.
+
+### Status etapów po uzupełnieniu
+
+- **Etap 1:** fundament siatki i trasowania ukończony. Nie oznacza to ukończenia wszystkich późniejszych mechanik terenu.
+- **Etap 2:** nadal częściowy. Dwanaście rozliczeń miesięcznych jest dostępnych, lecz pełny ranking wielu Lordów, dyplomacja, alerty Skryby i komplet skrótów/menu kontekstowych pozostają nieukończone.
+- **Etap 3:** populacja, pracownicy, bilans popularności, religia i strach działają; dokładne koszty łapówek pozostają wyłączone, dopóki nie zostaną zdefiniowane.
+- **Etap 4:** fizyczne magazyny, dostawy, produkcja i handel ręczny są wdrożone i testowane.
+- **Etap 5:** **częściowo wdrożony, nieukończony**. Działają Lordowie jako cele rozstrzygnięcia, cztery klasy rekrutacji, pięć typów fortyfikacji i podstawowy ostrzał wież. Nadal brakuje m.in. fos kopanych przez pracowników, zasypywania, schodów, mostów zwodzonych, przejmowania bram, smoły/pożarów/gaszenia/oleju/zarazy, pełnych klas jednostek, machin oblężniczych, pocisków artyleryjskich/ogniowych, friendly fire i patroli.
+- **Etap 6:** **nadal nieukończony**. Działają cywile, kolejki dostaw i podstawowy agresywny oddział najeźdźców, ale przeciwnik nie ma własnej ekonomii/populacji/planów zamku/handlu/rekrutacji, systemu dyplomacji i sojuszników. Pełne alerty tekstowe/głosowe oraz końcowa integracja AI pozostają do wykonania.
+
+### Testy tej iteracji
+- Automatyczny zestaw testów: 113/113 PASS.
+- TypeScript tsc --noEmit: PASS.
+- Produkcyjny build Vite: PASS.
+- Nie wykonano testu wizualnego w przeglądarce ani pomiaru FPS. Brak libatk-1.0.so.0 nadal blokuje używany serwerowy headless Chromium; testy logiki i build nie są przedstawiane jako dowód jakości obrazu ani 60 FPS.

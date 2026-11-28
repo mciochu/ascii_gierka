@@ -26,12 +26,12 @@ test("katalog zawiera rozpoznawalne pozycje każdej kategorii Stronghold", () =>
   assert.equal(allItems.size, 52);
 });
 
-test("budowle etapów 3 i 4 są aktywne, a mechaniki późniejszych etapów pozostają zablokowane", () => {
+test("etapy 3–4 oraz wybrane elementy fortyfikacji są aktywne, a pozostałe mechaniki późniejsze pozostają zablokowane", () => {
   const enabled = BUILD_CATEGORIES.flatMap((category) => category.items)
     .filter((item) => item.implemented)
     .map((item) => item.id);
   assert.deepEqual(enabled, [
-    "watchtower", "armory", "stockpile", "woodcutter", "quarry", "ox-tether", "iron-mine", "pitch-worker", "market",
+    "watchtower", "wall-high", "wall-low", "gate-small", "gate-large", "armory", "moat-plan", "stockpile", "woodcutter", "quarry", "ox-tether", "iron-mine", "pitch-worker", "market",
     "granary", "hunter", "apple-orchard", "dairy-farm", "wheat-farm", "hop-farm",
     "hovel", "chapel", "church", "cathedral", "good-things", "bad-things",
     "bowyer", "poleturner", "blacksmith", "tanner", "armourer", "mill", "bakery", "brewery", "inn"
@@ -42,7 +42,12 @@ test("budowle etapów 3 i 4 są aktywne, a mechaniki późniejszych etapów pozo
   assert.equal(findBuildItem("inn")?.cost, "20 drewna · 100 złota · 1 karczmarz");
   assert.equal(findBuildItem("market")?.implemented, true);
   assert.equal(findBuildItem("quarry")?.implemented, true);
-  assert.equal(findBuildItem("wall-high")?.implemented, undefined);
+  assert.equal(findBuildItem("wall-high")?.implemented, true);
+  assert.equal(findBuildItem("gate-small")?.implemented, true);
+  assert.equal(findBuildItem("moat-plan")?.implemented, true);
+  assert.equal(findBuildItem("stairs")?.implemented, undefined);
+  assert.equal(findBuildItem("drawbridge")?.implemented, undefined);
+  assert.equal(findBuildItem("oil-cauldron")?.implemented, undefined);
 });
 
 test("wyszukiwanie kategorii i budowli zwraca właściwe pozycje", () => {

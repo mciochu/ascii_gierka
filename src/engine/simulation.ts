@@ -70,6 +70,8 @@ export interface SimulationState {
   month: number;
   speed: number;
   monthProgress: number;
+  /** Most recent twelve actual month settlements; persisted in local saves. */
+  monthlyHistory: MonthlyReport[];
   gold: number;
   food: number;
   wood: number;
@@ -217,7 +219,7 @@ export function removeWorksite(state: SimulationState, worksiteId: string): void
 
 export function createSimulation(): SimulationState {
   const state: SimulationState = {
-    month: 1, speed: 40, monthProgress: 0,
+    month: 1, speed: 40, monthProgress: 0, monthlyHistory: [],
     gold: 1240, food: 860, wood: 340, stone: 210,
     popularity: 65, population: 8, housing: 8, unemployed: 8,
     ration: 1, tax: "none", bribeCostPerVillager: null, foodTypes: 1, taverns: 0, beerBarrels: 0,
@@ -677,7 +679,10 @@ export function advanceSimulation(state: SimulationState, realDeltaSeconds: numb
   const reports: MonthlyReport[] = [];
   while (state.monthProgress >= MONTH_LENGTH_SECONDS) {
     state.monthProgress -= MONTH_LENGTH_SECONDS;
-    reports.push(settleMonth(state));
+    const report = settleMonth(state);
+    state.monthlyHistory.push(report);
+    if (state.monthlyHistory.length > 12) state.monthlyHistory.splice(0, state.monthlyHistory.length - 12);
+    reports.push(report);
   }
   return reports;
 }

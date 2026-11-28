@@ -1,7 +1,8 @@
 import { Container } from "pixi.js";
 import { addGlyph, addWord, GlyphDisplay, type GlyphLodSet } from "./glyph";
 import { HUNTING_NODES, type ProductionType, type StorageType } from "./logistics";
-import { createWorldGrid, GRID_PIVOT, worldPositionForCell, type WorldGrid } from "./grid";
+import { applyFortificationToTile, canPlaceFortification, type FortificationKind } from "./fortifications";
+import { createWorldGrid, GRID_PIVOT, worldPositionForCell, type WorldGrid, type TerrainKind } from "./grid";
 
 export type EntityKind = "building" | "unit";
 export type Faction = "player" | "enemy" | "neutral";
@@ -31,6 +32,14 @@ export interface GameEntity {
   holdPosition?: boolean;
   stance?: UnitStance;
   stanceReturnTarget?: { x: number; y: number };
+  lordSide?: "player" | "enemy";
+  fortificationKind?: FortificationKind;
+  gridCol?: number;
+  gridRow?: number;
+  gateOpen?: boolean;
+  underlyingTerrain?: TerrainKind;
+  underlyingWalkable?: boolean;
+  underlyingBuildable?: boolean;
   group: Container;
 }
 
@@ -407,76 +416,74 @@ function makeStorehouse(parent: Container, x: number, y: number): Container {
   return group;
 }
 
-function makeUnit(parent: Container, x: number, y: number, variant: number, count: number): Container {
+function makeUnit(
+  parent: Container,
+  x: number,
+  y: number,
+  variant: number,
+  count: number,
+  unitClass?: string,
+  team: Faction = "player"
+): Container {
   const group = new Container();
   parent.addChild(group);
-  const offsets = variant === 0
+  const offsets = (variant === 0
     ? [[-17, 7], [0, -5], [16, 8], [2, 17]]
-    : variant === 1
-      ? [[-12, -9], [9, -12], [-2, 10]]
-      : [[-18, 0], [0, -10], [18, 3], [5, 18]];
-  const role = variant === 1 ? "archer" : variant === 2 ? "cavalry" : variant === 3 ? "raider" : "pikeman";
+    : variant === 1 || variant === 4
+      ? [[-12, -9], [9, -12], [-2, 10], [16, 13]]
+      : [[-18, 0], [0, -10], [18, 3], [5, 18]]
+  ).slice(0, Math.max(1, Math.min(4, count)));
+  const role = unitClass ?? (variant === 1 ? "archers" : variant === 2 ? "cavalry" : variant === 3 ? "raiders" : "pikemen");
   const tacticalGlyph = variant === 1 ? ")" : variant === 2 ? "m" : variant === 3 ? "*" : "█";
-  const closeSilhouette: Record<string, string[]> = {
-    pikeman: [" | ", "/|+", "|#|", "/|+", "/ +"],
-    archer: [" ) ", "/#)", "|#/", " / ", "/ #"],
-    cavalry: [" m ", "/|+", "|#|", "/|+", "v v"],
-    raider: [" ! ", "/#/", "|x|", "/|+", "/ +"]
+  const classGlyph: Record<string, string> = {
+    archers: ")", crossbowmen: "}", pikemen: "█", swordsmen: "⚔",
+    cavalry: "m", raiders: "*", lord: "♛"
   };
-  const standardSilhouette: Record<string, string[]> = {
-    pikeman: [" |", "/#", "/ "],
-    archer: [")/", "/#", "/ "],
-    cavalry: ["m ", "/|", "v "],
-    raider: ["! ", "/#", "/ "]
+  const silhouettes: Record<string, { close: string[]; standard: string[] }> = {
+    pikemen: { close: [" | ", "/|+", "|#|", "/|+", "/ +"], standard: [" |", "/#", "/ "] },
+    archers: { close: [" ) ", "/#)", "|#/", " / ", "/ #"], standard: [")/", "/#", "/ "] },
+    crossbowmen: { close: [" } ", "/#}", "|#/", "/| ", "/ #"], standard: ["}/", "/#", "/ "] },
+    swordsmen: { close: [" ⚔ ", "/|+", "|#|", "/|+", "/ +"], standard: ["⚔ ", "/#", "/ "] },
+    cavalry: { close: [" m ", "/|+", "|#|", "/|+", "v v"], standard: ["m ", "/|", "v "] },
+    raiders: { close: [" ! ", "/#/", "|x|", "/|+", "/ +"], standard: ["! ", "/#", "/ "] },
+    lord: { close: [" ♛ ", "/|+", "|#|", "/|+", "/ +"], standard: ["♛ ", "/#", "/ "] }
   };
-  const color = variant === 3 ? "#f07869" : variant === 1 ? "#a5d6f1" : "#74c7f5";
+  const palette = team === "enemy" || variant === 3
+    ? "#f07869"
+    : role === "archers" || role === "crossbowmen" ? "#a5d6f1"
+      : role === "lord" ? "#e5c987" : "#74c7f5";
+  const silhouette = silhouettes[role] ?? silhouettes.pikemen!;
   offsets.forEach(([ox, oy]) => {
-    closeSilhouette[role]!.forEach((row, rowIndex) => {
+    silhouette.close.forEach((row, rowIndex) => {
       Array.from(row).forEach((character, columnIndex) => {
         if (character === " ") return;
         addGlyph(group, {
-          char: character,
-          x: ox + (columnIndex - 1) * 5,
-          y: oy + (rowIndex - 2) * 6.5,
-          size: 6,
-          color,
-          alpha: 0.98,
-          material: "unit",
-          height: 0.24,
-          lod: "close"
+          char: character, x: ox + (columnIndex - 1) * 5, y: oy + (rowIndex - 2) * 6.5,
+          size: 6, color: palette, alpha: 0.98, material: "unit", height: 0.24, lod: "close"
         });
       });
     });
-    standardSilhouette[role]!.forEach((row, rowIndex) => {
+    silhouette.standard.forEach((row, rowIndex) => {
       Array.from(row).forEach((character, columnIndex) => {
         if (character === " ") return;
         addGlyph(group, {
-          char: character,
-          x: ox + (columnIndex - 0.5) * 7,
-          y: oy + (rowIndex - 1) * 8,
-          size: 8,
-          color,
-          alpha: 0.98,
-          material: "unit",
-          height: 0.24,
-          lod: "standard"
+          char: character, x: ox + (columnIndex - 0.5) * 7, y: oy + (rowIndex - 1) * 8,
+          size: 8, color: palette, alpha: 0.98, material: "unit", height: 0.24, lod: "standard"
         });
       });
     });
   });
   addGlyph(group, {
-    char: tacticalGlyph, x: 0, y: 0, size: 24, color, weight: "bold",
-    alpha: 0.98, material: "unit", height: 0.24, lod: "strategic",
-    minScreenCells: [1, 2]
+    char: classGlyph[role] ?? tacticalGlyph, x: 0, y: 0, size: 24, color: palette, weight: "bold",
+    alpha: 0.98, material: "unit", height: 0.24, lod: "strategic", minScreenCells: [1, 2]
   });
   addGlyph(group, {
-    char: "[x" + count + "]", x: 18, y: -17, size: 14, color, weight: "bold",
-    alpha: 0.98, material: "unit", height: 0.24, lod: "strategic",
-    minScreenCells: [1, 1]
+    char: "[x" + count + "]", x: 18, y: -17, size: 14, color: palette, weight: "bold",
+    alpha: 0.98, material: "unit", height: 0.24, lod: "strategic", minScreenCells: [1, 1]
   });
   addGlyph(group, {
     char: "⚑", x: 0, y: -27, size: 16,
-    color: variant === 3 ? "#f05252" : variant === 2 ? "#e4bd63" : "#75c9f3",
+    color: team === "enemy" || variant === 3 ? "#f05252" : role === "lord" ? "#e5c987" : "#75c9f3",
     material: "unit", lod: "standard"
   });
   group.position.set(x, y);
@@ -537,10 +544,92 @@ function entity(
   }
   return {
     group, id, name, kind, description, role, x, y, health, maxHealth: 100, count, team, unitClass,
-    moveSpeed: unitClass === "cavalry" ? 142 : unitClass === "archers" ? 82 : 94,
-    attackDamage: unitClass === "archers" ? 11 : unitClass === "cavalry" ? 14 : 9,
-    attackRange: unitClass === "archers" ? 150 : unitClass === "cavalry" ? 48 : 55
+    moveSpeed: unitClass === "cavalry" ? 142 : unitClass === "archers" ? 82 : unitClass === "crossbowmen" ? 72 : 94,
+    attackDamage: unitClass === "archers" ? 11 : unitClass === "crossbowmen" ? 16 : unitClass === "swordsmen" ? 15 : unitClass === "cavalry" ? 14 : 9,
+    attackRange: unitClass === "archers" ? 150 : unitClass === "crossbowmen" ? 185 : unitClass === "cavalry" ? 48 : 55
   };
+}
+
+
+export function createFortification(
+  parent: Container,
+  grid: WorldGrid,
+  id: string,
+  kind: FortificationKind,
+  col: number,
+  row: number
+): GameEntity | null {
+  if (!canPlaceFortification(grid, col, row)) return null;
+  const point = worldPositionForCell(grid, col, row);
+  const tile = grid.tiles[row * grid.columns + col];
+  if (!point || !tile) return null;
+  const group = new Container();
+  parent.addChild(group);
+  const visuals: Record<FortificationKind, { name: string; glyph: string; color: string; size: number; health: number }> = {
+    "wall-high": { name: "Mur wysoki", glyph: "▤", color: "#b8c5ce", size: 37, health: 360 },
+    "wall-low": { name: "Mur niski", glyph: "▥", color: "#9daeb7", size: 29, health: 240 },
+    "gate-small": { name: "Brama mała", glyph: "╫", color: "#c5a36d", size: 36, health: 320 },
+    "gate-large": { name: "Brama duża", glyph: "╬", color: "#d2ae72", size: 44, health: 420 },
+    moat: { name: "Fosa", glyph: "≈", color: "#4b9fc5", size: 37, health: 200 }
+  };
+  const visual = visuals[kind];
+  if (kind === "moat") {
+    addGlyph(group, { char: "≈", x: -9, y: 1, size: 26, color: "#317da2", alpha: 0.9, material: "terrain" });
+    addGlyph(group, { char: "≈", x: 9, y: -3, size: 26, color: "#58b1d5", alpha: 0.86, material: "terrain" });
+    addGlyph(group, { char: "·", x: 0, y: 8, size: 12, color: "#8ad8ec", alpha: 0.7, material: "terrain" });
+  } else {
+    addGlyph(group, { char: visual.glyph, x: 0, y: 0, size: visual.size, color: visual.color, weight: "bold", alpha: 0.97, material: "building", height: kind === "wall-high" ? 0.85 : 0.55 });
+    if (kind === "wall-high") addGlyph(group, { char: "╥", x: 0, y: -17, size: 19, color: "#dbe3e7", alpha: 0.9, material: "building" });
+    if (kind === "gate-small" || kind === "gate-large") addGlyph(group, { char: "⚑", x: 0, y: -19, size: 16, color: "#e8c37d", alpha: 0.95 });
+  }
+  group.position.set(point.x, point.y);
+  const created = entity(
+    group, id, visual.name, "building",
+    kind === "moat" ? "Wykopana fosa. Blokuje przejście piesze i wymaga mostu lub obejścia." :
+      kind.includes("gate") ? "Brama fortyfikacji. Można ją otwierać i zamykać; zamknięta blokuje ruch." :
+        "Odcinek fortyfikacji. Blokuje ruch i może przyjmować obrażenia.",
+    kind === "moat" ? "OBRONA · FOSA" : kind.includes("gate") ? "OBRONA · BRAMA" : "OBRONA · MUR",
+    point.x, point.y, visual.health, undefined, "player", kind
+  );
+  created.maxHealth = visual.health;
+  created.fortificationKind = kind;
+  created.gridCol = col;
+  created.gridRow = row;
+  created.gateOpen = false;
+  created.underlyingTerrain = tile.terrain;
+  created.underlyingWalkable = tile.walkable;
+  created.underlyingBuildable = tile.buildable;
+  if (!applyFortificationToTile(grid, created)) {
+    group.destroy({ children: true });
+    return null;
+  }
+  return created;
+}
+
+export function createCombatSquad(
+  parent: Container,
+  id: string,
+  unitClass: string,
+  count: number,
+  x: number,
+  y: number,
+  team: Faction = "player"
+): GameEntity {
+  const variants: Record<string, number> = {
+    pikemen: 0, archers: 1, cavalry: 2, raiders: 3, crossbowmen: 4, swordsmen: 5, lord: 0
+  };
+  const labels: Record<string, { name: string; role: string; description: string }> = {
+    pikemen: { name: "Pikinierzy", role: "PIKINIERZY · ODDZIAŁ", description: "Piechota z pikami. Broń pochodzi ze Zbrojowni." },
+    archers: { name: "Łucznicy", role: "ŁUCZNICY · ODDZIAŁ", description: "Piechota dystansowa uzbrojona w łuki." },
+    crossbowmen: { name: "Kusznicy", role: "KUSZNICY · ODDZIAŁ", description: "Cięższa piechota dystansowa uzbrojona w kusze." },
+    swordsmen: { name: "Szermierze", role: "SZERMIERZE · ODDZIAŁ", description: "Piechota walcząca mieczami." },
+    cavalry: { name: "Kawaleria", role: "KAWALERIA · ODDZIAŁ", description: "Ruchliwy oddział konny." },
+    raiders: { name: "Rozbójnicy", role: "ROZBÓJNICY · ODDZIAŁ", description: "Wrogi oddział najeźdźców." },
+    lord: { name: team === "enemy" ? "Wrogi Lord" : "Lord Castellum", role: "WŁADCA · WARUNEK ZWYCIĘSTWA", description: "Pojedynczy władca. Jego śmierć kończy rozgrywkę." }
+  };
+  const label = labels[unitClass] ?? labels.pikemen!;
+  const group = makeUnit(parent, x, y, variants[unitClass] ?? 0, count, unitClass, team);
+  return entity(group, id, label.name, "unit", label.description, label.role, x, y, 100, count, team, unitClass);
 }
 
 export function createWorld(root: Container): WorldState {
@@ -599,8 +688,28 @@ export function createWorld(root: Container): WorldState {
   const riders = makeUnit(layers.actors, 775, 1300, 2, 5);
   entities.push(entity(riders, "riders", "Zwiadowcy", "unit", "Ruchliwy oddział patrolowy. Może szybko dotrzeć do odległych części posiadłości.", "ZWIADOWCY · KONNI", 775, 1300, 100, 5, "player", "cavalry"));
 
-  const raiders = makeUnit(layers.actors, 2150, 1050, 3, 9);
-  entities.push(entity(raiders, "raiders", "Banda rozbójników", "unit", "Wrogi oddział grasujący przy trakcie. Czerwone sztandary oznaczają nieprzyjaciela.", "ROZBÓJNICY · WROGI ODDZIAŁ", 2150, 1050, 100, 9, "enemy", "raiders"));
+  const raiders = makeUnit(layers.actors, 2150, 1050, 3, 9, "raiders", "enemy");
+  const raiderUnit = entity(raiders, "raiders", "Banda rozbójników", "unit", "Wrogi oddział grasujący przy trakcie. Czerwone sztandary oznaczają nieprzyjaciela.", "ROZBÓJNICY · WROGI ODDZIAŁ", 2150, 1050, 100, 9, "enemy", "raiders");
+  raiderUnit.stance = "aggressive";
+  entities.push(raiderUnit);
+
+  const playerLord = createCombatSquad(layers.actors, "lord", "lord", 1, 1240, 890, "player");
+  playerLord.lordSide = "player";
+  playerLord.attackDamage = 16;
+  playerLord.attackRange = 52;
+  playerLord.moveSpeed = 88;
+  playerLord.stance = "defensive";
+  playerLord.stanceReturnTarget = { x: playerLord.x, y: playerLord.y };
+  entities.push(playerLord);
+
+  const enemyLord = createCombatSquad(layers.actors, "enemy-lord", "lord", 1, 2310, 930, "enemy");
+  enemyLord.lordSide = "enemy";
+  enemyLord.attackDamage = 16;
+  enemyLord.attackRange = 52;
+  enemyLord.moveSpeed = 88;
+  enemyLord.stance = "stand-ground";
+  enemyLord.holdPosition = true;
+  entities.push(enemyLord);
 
   return { entities, layers, grid, setFlattened };
 }

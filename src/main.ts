@@ -9,9 +9,10 @@ import {
   type EffulgenceSettings
 } from "./engine/effulgence";
 import { addGlyph, type GlyphDisplay } from "./engine/glyph";
+import { advanceProjectile, projectileDuration, projectilePointAt } from "./engine/projectiles";
 import { createEffulgenceRenderGraph } from "./engine/render-graph";
 import {
-  createWatchtower, createTownBuilding, createStorageBuilding, createProductionBuilding, createWorld, WORLD_SIZE,
+  createWatchtower, createTownBuilding, createStorageBuilding, createProductionBuilding, createCombatSquad, createFortification, createWorld, WORLD_SIZE,
   type GameEntity, type TownBuildingType, type LogisticsBuildingType
 } from "./engine/world";
 import {
@@ -42,9 +43,18 @@ import {
   syncPopulationCounters,
   updateBlessedShare,
   createSimulation,
+  recruitFromCampfire,
   TAX_RULES
 } from "./engine/simulation";
 import { BUILD_CATEGORIES, findBuildCategory, findBuildItem } from "./ui/catalog";
+import {
+  canRecruitUnit, RECRUITMENT_RECIPES, resolveLordOutcome,
+  type GameOutcome, type RecruitableUnitClass
+} from "./engine/warfare";
+import {
+  canPlaceFortification, FORTIFICATION_COSTS, removeFortificationFromTile, setFortificationGate,
+  type FortificationKind
+} from "./engine/fortifications";
 import {
   DEFAULT_STORAGE_CAPACITY, HUNTING_NODES, PRODUCTION_RECIPES, RESOURCE_DEFINITIONS, STAGE4_BUILD_COSTS,
   STORAGE_MODULE_CAPACITY, STORAGE_MODULE_COST, canStoreResource, expandStorage,
@@ -55,6 +65,7 @@ import {
   findGridPath,
   GRID_PIVOT,
   isBuildableAtWorld,
+  isWalkableAtWorld,
   isWorldPointInViewport,
   viewportToWorld,
   worldPositionForCell,
@@ -94,6 +105,9 @@ interface GameSave {
   towerCounter: number;
   townBuildingCounter: number;
   stage4BuildingCounter: number;
+  recruitedUnitCounter?: number;
+  fortificationCounter?: number;
+  gameOutcome?: GameOutcome;
   camera: CameraState;
   cameraBookmarks: [number, CameraState][];
   lastCameraBeforeJump: CameraState | null;
@@ -204,6 +218,18 @@ let mapRotation = 0;
 const MAP_PIVOT = GRID_PIVOT;
 let mode: ToolMode = "select";
 let paused = false;
+let gameOutcome: GameOutcome = "playing";
+let recruitedUnitCounter = 0;
+let fortificationCounter = 0;
+interface CombatProjectile {
+  targetId: string;
+  start: { x: number; y: number };
+  elapsed: number;
+  duration: number;
+  damage: number;
+  glyph: GlyphDisplay;
+}
+const combatProjectiles: CombatProjectile[] = [];
 const simulation = createSimulation();
 let gold = simulation.gold;
 let food = simulation.food;
@@ -265,6 +291,17 @@ function selectedUnits(): GameEntity[] {
 
 function canPlaceBuildPreview(itemId: string, point: { x: number; y: number }): boolean {
   if (point.x < 40 || point.y < 40 || point.x > WORLD_SIZE.width - 40 || point.y > WORLD_SIZE.height - 40) return false;
+  if (FORTIFICATION_BUILDING_IDS.includes(itemId)) {
+    const kind = FORTIFICATION_KIND_BY_ITEM[itemId]!;
+    const tile = worldToCell(world.grid, point);
+    if (!tile || !canPlaceFortification(world.grid, tile.col, tile.row) ||
+        entities.some((entity) => entity.fortificationKind
+          ? entity.gridCol === tile.col && entity.gridRow === tile.row
+          : Math.hypot(entity.x - point.x, entity.y - point.y) < (entity.kind === "building" ? 48 : 38))) return false;
+    const cost = FORTIFICATION_COSTS[kind];
+    return totalResource(simulation, "wood") >= cost.wood &&
+      totalResource(simulation, "stone") >= cost.stone && simulation.gold >= cost.gold;
+  }
   if (STAGE4_BUILDING_IDS.includes(itemId)) {
     const cost = STAGE4_BUILD_COSTS[itemId];
     const placement = stage4PlacementPoint(itemId, point.x, point.y);
@@ -700,6 +737,84 @@ const variantNamesForMain: Partial<Record<ResourceId, string>> = {
   bow: "Łuk", crossbow: "Kusza", spear: "Włócznia", pike: "Pika", mace: "Buzdygan", sword: "Miecz"
 };
 
+
+function recruitmentSpawnPoint(): { x: number; y: number } | null {
+  const barracks = entities.find((entity) => entity.id === "barracks");
+  if (!barracks) return null;
+  const origin = worldToCell(world.grid, barracks);
+  if (!origin) return null;
+  const candidates: { x: number; y: number; distance: number }[] = [];
+  for (let radius = 1; radius <= 5; radius += 1) {
+    for (let dr = -radius; dr <= radius; dr += 1) {
+      for (let dc = -radius; dc <= radius; dc += 1) {
+        if (Math.max(Math.abs(dc), Math.abs(dr)) !== radius) continue;
+        const col = origin.col + dc;
+        const row = origin.row + dr;
+        const tile = world.grid.tiles[row * world.grid.columns + col];
+        if (!tile || !tile.walkable || !tile.buildable) continue;
+        const point = worldPositionForCell(world.grid, col, row);
+        if (!point || !findGridPath(world.grid, barracks, point)) continue;
+        if (entities.some((entity) => Math.hypot(entity.x - point.x, entity.y - point.y) < (entity.kind === "building" ? 62 : 46))) continue;
+        candidates.push({ ...point, distance: Math.hypot(point.x - barracks.x, point.y - barracks.y) });
+      }
+    }
+    if (candidates.length) break;
+  }
+  candidates.sort((a, b) => a.distance - b.distance);
+  return candidates[0] ? { x: candidates[0].x, y: candidates[0].y } : null;
+}
+
+function recruitAtBarracks(unitClass: RecruitableUnitClass): void {
+  if (paused || gameOutcome !== "playing") {
+    setStatus("Rekrutacja jest dostępna wyłącznie podczas aktywnej rozgrywki.");
+    return;
+  }
+  const recipe = RECRUITMENT_RECIPES[unitClass];
+  if (!recipe) return;
+  const stock = totalResource(simulation, recipe.weapon);
+  if (!canRecruitUnit(unitClass, simulation.unemployed, stock, gameOutcome) ||
+      !simulation.villagers.some((villager) => villager.status === "idle")) {
+    setStatus("Brak bezrobotnego chłopa lub właściwej broni w Zbrojowni.");
+    renderSelectionPanel();
+    return;
+  }
+  const spawn = recruitmentSpawnPoint();
+  if (!spawn) {
+    setStatus("Brak wolnego, dostępnego pola przy Koszarach. Oczyść miejsce na wymarsz oddziału.");
+    return;
+  }
+  if (!spendStoredResource(simulation, recipe.weapon, 1)) {
+    setStatus("Broń musi znajdować się fizycznie w Zbrojowni.");
+    return;
+  }
+  if (!recruitFromCampfire(simulation)) {
+    storeResource(simulation, "armory", recipe.weapon, 1);
+    setStatus("Nie znaleziono bezrobotnego mieszkańca przy ognisku.");
+    return;
+  }
+  recruitedUnitCounter += 1;
+  const squad = createCombatSquad(
+    world.layers.actors,
+    "recruit-" + unitClass + "-" + recruitedUnitCounter,
+    unitClass,
+    1,
+    spawn.x,
+    spawn.y,
+    "player"
+  );
+  squad.attackDamage = recipe.damage;
+  squad.attackRange = recipe.range;
+  squad.moveSpeed = recipe.speed;
+  entities.push(squad);
+  syncPopulationCounters(simulation);
+  syncResourceCounters(simulation);
+  setResources();
+  updateVillagerVisuals(0);
+  renderMinimap();
+  replaceSelection([squad]);
+  setStatus("Zwerbowano: " + recipe.label + ". Zużyto 1 bezrobotnego i 1 " + RESOURCE_DEFINITIONS[recipe.weapon].name + " ze Zbrojowni.");
+}
+
 function renderSelectionPanel(): void {
   const selection = allSelected();
   const units = selection.filter((entity) => entity.kind === "unit");
@@ -740,7 +855,7 @@ function renderSelectionPanel(): void {
       '<button type="button" data-command="attack-move">⚔ ATAK W RUCHU</button></div></div>';
   } else {
     const entity = selection[0]!;
-    const health = Math.max(0, Math.min(100, entity.health));
+    const health = Math.max(0, Math.min(100, (entity.health / Math.max(1, entity.maxHealth)) * 100));
     const worksite = entity.kind === "building"
       ? simulation.worksites.find((site) => site.id === entity.id)
       : undefined;
@@ -786,6 +901,23 @@ function renderSelectionPanel(): void {
             '<button type="button" data-market-direction="sell" data-market-resource="' + resource + '" data-market-quantity="5"' + (paused ? ' disabled' : '') + '>−5</button></div></div>';
         }).join("") + '</div>'
       : '';
+    const barracksMarkup = entity.id === "barracks"
+      ? '<div class="worksite-controls"><div class="selection-meta">REKRUTACJA · ZBROJOWNIA I OGNISKO</div>' +
+        (Object.keys(RECRUITMENT_RECIPES) as RecruitableUnitClass[]).map((unitClass) => {
+          const recipe = RECRUITMENT_RECIPES[unitClass];
+          const stock = totalResource(simulation, recipe.weapon);
+          const enabled = canRecruitUnit(unitClass, simulation.unemployed, stock, gameOutcome) &&
+            simulation.villagers.some((villager) => villager.status === "idle") && !paused;
+          return '<div class="dialog-row"><span>' + recipe.label + '<small>' + RESOURCE_DEFINITIONS[recipe.weapon].name + ': ' + stock + '</small></span>' +
+            '<button type="button" data-recruit-unit="' + unitClass + '"' + (enabled ? '' : ' disabled') + '>ZWERBUJ · 1</button></div>';
+        }).join("") +
+        '<p class="dialog-note">Rekrutacja zużywa jednego bezrobotnego i jedną sztukę właściwej broni z fizycznej Zbrojowni. Nie pobiera złota — ceny rekrutacji nie zostały określone w konfiguracji.</p></div>'
+      : '';
+    const gateMarkup = entity.fortificationKind === "gate-small" || entity.fortificationKind === "gate-large"
+      ? '<div class="worksite-controls"><div class="selection-meta">BRAMA · KONTROLA PRZEJŚCIA</div><button type="button" data-gate-toggle="' + entity.id + '"' + (paused ? ' disabled' : '') + '>' +
+        (entity.gateOpen ? 'ZAMKNIJ BRAMĘ' : 'OTWÓRZ BRAMĘ') + '</button><p class="dialog-note">' +
+        (entity.gateOpen ? 'Brama jest otwarta i przepuszcza ruch.' : 'Brama jest zamknięta i blokuje ruch.') + '</p></div>'
+      : '';
 
     contextContent.innerHTML =
       '<div class="selection-panel single-selection"><div class="selection-topline"><span>' +
@@ -795,7 +927,7 @@ function renderSelectionPanel(): void {
       '%;background:' + (entity.team === "enemy" ? "#e45b52" : "#78b8dd") +
       '"></span></div><div class="selection-meta">WYTRZYMAŁOŚĆ <b>' + Math.ceil(health) + '%</b></div>' +
       (entity.kind === "unit" ? '<div class="selection-meta">LICZEBNOŚĆ <b>' + (entity.count ?? 1) + '</b></div>' : '') +
-      storageMarkup + worksiteMarkup + marketMarkup +
+      storageMarkup + worksiteMarkup + marketMarkup + barracksMarkup + gateMarkup +
       (entity.kind === "unit" && entity.team === "player" ?
         '<div class="stance-controls"><small>POSTAWA BOJOWA · ' + (entity.stance ?? "DOMYŚLNA").toUpperCase() +
         '</small><div><button type="button" data-stance="stand-ground">▣ UTRZYMAĆ POZYCJĘ</button>' +
@@ -848,6 +980,24 @@ function renderSelectionPanel(): void {
       setResources();
       renderSelectionPanel();
       setStatus(result.message);
+    });
+  });
+  contextContent.querySelectorAll<HTMLButtonElement>("[data-gate-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (paused) return;
+      const gate = entities.find((candidate) => candidate.id === button.dataset.gateToggle);
+      if (!gate || !gate.fortificationKind) return;
+      if (setFortificationGate(world.grid, gate, gate.gateOpen !== true)) {
+        renderMinimap();
+        updateSelection();
+        setStatus(gate.gateOpen ? "Brama otwarta — jednostki mogą przejść." : "Brama zamknięta — przejście zablokowane.");
+      }
+    });
+  });
+  contextContent.querySelectorAll<HTMLButtonElement>("[data-recruit-unit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const unitClass = button.dataset.recruitUnit as RecruitableUnitClass | undefined;
+      if (unitClass && Object.hasOwn(RECRUITMENT_RECIPES, unitClass)) recruitAtBarracks(unitClass);
     });
   });
   contextContent.querySelectorAll<HTMLButtonElement>("[data-unit-type]").forEach((button) => {
@@ -1250,6 +1400,11 @@ function runSelectionCommand(command: string): void {
 const STAGE4_STORAGE_TYPES: Record<string, StorageType> = { stockpile: "stockpile", granary: "granary", armory: "armory" };
 const STAGE4_PRODUCTION_TYPES = Object.keys(PRODUCTION_RECIPES) as ProductionType[];
 const STAGE4_BUILDING_IDS = ["stockpile", "granary", "armory", "market", "ox-tether", ...STAGE4_PRODUCTION_TYPES];
+const FORTIFICATION_BUILDING_IDS = ["wall-high", "wall-low", "gate-small", "gate-large", "moat-plan"];
+const FORTIFICATION_KIND_BY_ITEM: Record<string, FortificationKind> = {
+  "wall-high": "wall-high", "wall-low": "wall-low",
+  "gate-small": "gate-small", "gate-large": "gate-large", "moat-plan": "moat"
+};
 
 function findProductionSource(type: ProductionType, point: { x: number; y: number }): { x: number; y: number } | null {
   const recipe = PRODUCTION_RECIPES[type];
@@ -1363,6 +1518,58 @@ function placeStage4Building(itemId: string, x: number, y: number): void {
     ? "Utworzono fizyczny magazyn. Pojemność początkowa: " + DEFAULT_STORAGE_CAPACITY + " pól."
     : itemId === "market" ? "Targowisko jest gotowe do ręcznego handlu." : "Załoga została przydzielona. Produkcja czeka na surowce i wolne miejsce w magazynie.";
   setStatus(building.name + " wzniesiono. " + note);
+}
+
+
+function placeFortification(itemId: string, x: number, y: number): void {
+  if (paused || gameOutcome !== "playing") { setStatus("Fortyfikacje można stawiać wyłącznie w aktywnej rozgrywce."); return; }
+  const kind = FORTIFICATION_KIND_BY_ITEM[itemId];
+  if (!kind) return;
+  const tile = worldToCell(world.grid, { x, y });
+  const point = tile ? worldPositionForCell(world.grid, tile.col, tile.row) : null;
+  if (!tile || !point || !canPlaceFortification(world.grid, tile.col, tile.row)) {
+    setStatus("Fortyfikacja wymaga wolnego, przechodniego pola możliwego do zabudowy.");
+    return;
+  }
+  if (entities.some((entity) => entity.fortificationKind
+    ? entity.gridCol === tile.col && entity.gridRow === tile.row
+    : Math.hypot(entity.x - point.x, entity.y - point.y) < (entity.kind === "building" ? 48 : 38))) {
+    setStatus("To pole jest już zajęte.");
+    return;
+  }
+  const cost = FORTIFICATION_COSTS[kind];
+  if (totalResource(simulation, "wood") < cost.wood || totalResource(simulation, "stone") < cost.stone || simulation.gold < cost.gold) {
+    setStatus("Brakuje surowców w fizycznym Składzie.");
+    return;
+  }
+  if (cost.wood && !spendStoredResource(simulation, "wood", cost.wood)) return;
+  if (cost.stone && !spendStoredResource(simulation, "stone", cost.stone)) {
+    if (cost.wood) depositStoredResource(simulation, "stockpile", "wood", cost.wood);
+    setResources();
+    return;
+  }
+  simulation.gold -= cost.gold;
+  fortificationCounter += 1;
+  const id = (kind === "moat" ? "moat-" : kind + "-") + fortificationCounter;
+  const fortified = createFortification(world.layers.structures, world.grid, id, kind, tile.col, tile.row);
+  if (!fortified) {
+    if (cost.wood) depositStoredResource(simulation, "stockpile", "wood", cost.wood);
+    if (cost.stone) depositStoredResource(simulation, "stockpile", "stone", cost.stone);
+    simulation.gold += cost.gold;
+    fortificationCounter -= 1;
+    setResources();
+    setStatus("Nie udało się utworzyć fortyfikacji; surowce zwrócono.");
+    return;
+  }
+  entities.push(fortified);
+  placedStructures.set(id, { wood: cost.wood, stone: cost.stone, gold: cost.gold });
+  undoStack.push(id);
+  syncResourceCounters(simulation);
+  setResources();
+  replaceSelection([fortified]);
+  setMode("select");
+  renderMinimap();
+  setStatus(fortified.name + " wzniesiono. Odcinek blokuje ruch na zajętym polu siatki.");
 }
 
 function placeWatchtower(x: number, y: number): void {
@@ -1526,6 +1733,7 @@ function removePlacedStructure(entity: GameEntity, refundRatio: number): boolean
     refundTargets.push({ resource, amount, storageId: destination.id });
   }
   for (const refund of refundTargets) depositStoredResource(simulation, refund.storageId, refund.resource, refund.amount);
+  if (entity.fortificationKind) removeFortificationFromTile(world.grid, entity);
   entities.splice(index, 1);
   selectedIds.delete(entity.id);
   entity.group.destroy({ children: true });
@@ -1595,6 +1803,7 @@ function handleLeftClick(clientX: number, clientY: number, additive: boolean, to
 
   if (mode === "build") {
     if (selectedBuildItemId === "watchtower") placeWatchtower(point.x, point.y);
+    else if (FORTIFICATION_BUILDING_IDS.includes(selectedBuildItemId ?? "")) placeFortification(selectedBuildItemId ?? "", point.x, point.y);
     else if (STAGE4_BUILDING_IDS.includes(selectedBuildItemId ?? "")) placeStage4Building(selectedBuildItemId ?? "", point.x, point.y);
     else placeTownBuilding(selectedBuildItemId ?? "", point.x, point.y);
     return;
@@ -1936,7 +2145,17 @@ function renderReports(): void {
   const goodCount = simulation.fearObjects.filter((object) => object.kind === "good").length;
   const badCount = simulation.fearObjects.filter((object) => object.kind === "bad").length;
   const rationNames: Record<number, string> = { 0: "Brak", 0.5: "Połowa", 1: "Normalne", 1.5: "Dodatkowe", 2: "Podwójne" };
-  openDialog("KSIĘGA RAPORTÓW", "BILANS POPULARNOŚCI · W NADCHODZĄCYM MIESIĄCU",
+  const historyRows = simulation.monthlyHistory.slice(-12).map((report) =>
+    '<div class="dialog-row"><span>M' + (report.month - 1) + ' · ' + report.population + ' mieszk. · ' +
+      report.unemployed + ' bezrob.</span><b>Popularność ' + (report.popularityChange >= 0 ? '+' : '') +
+      report.popularityChange + ' · Żywność −' + report.foodConsumed.toFixed(2) +
+      ' · Podatki +' + report.taxes.toFixed(1) +
+      (report.bribeCost ? ' · Łapówka −' + report.bribeCost.toFixed(1) : '') + '</b></div>'
+  ).join("");
+  const historyMarkup = historyRows
+    ? historyRows
+    : '<p class="dialog-note">Brak rozliczonych miesięcy. Historia będzie wypełniać się po kolejnych 30 sekundach symulacji (z uwzględnieniem prędkości gry).</p>';
+  openDialog("KSIĘGA RAPORTÓW", "BILANS BIEŻĄCY · PROGNOZA I OSTATNIE 12 MIESIĘCY",
     '<div class="dialog-grid">' +
       '<div class="dialog-stat"><small>OBECNA POPULARNOŚĆ</small><b>' + simulation.popularity + '/100</b></div>' +
       '<div class="dialog-stat"><small>PROGNOZA PO NASTĘPNYM TICKU</small><b>' + projected + '/100</b></div>' +
@@ -1956,6 +2175,7 @@ function renderReports(): void {
     '<h3>Magazyny i towary · fizyczne pola</h3>' + storageRows +
     '<h3>Produkcja i logistyka</h3>' + productionRows +
     '<h3>Stan armii · według typów</h3>' + armyRows +
+    '<h3>Historia · ostatnie 12 rozliczeń</h3>' + historyMarkup +
     '<p class="dialog-note">Towary zajmują ograniczone pola magazynów. Pracownicy przewożą je pieszo; produkcja czeka, gdy brakuje wejścia lub wolnego pola w magazynie docelowym. Przyrost ludności zatrzymuje się przy popularności poniżej 50, braku miejsca albo 24 bezrobotnych przy ognisku. Żołnierze nie zajmują miejsc mieszkalnych i nie zużywają racji. Koszt łapówek pozostaje nieaktywny, dopóki nie zostanie skonfigurowany.</p>');
 }
 
@@ -1964,11 +2184,13 @@ function openRanking(): void {
     .reduce((sum, entity) => sum + (entity.count ?? 1), 0);
   const enemyArmy = entities.filter((entity) => entity.kind === "unit" && entity.team === "enemy")
     .reduce((sum, entity) => sum + (entity.count ?? 1), 0);
-  openDialog("TABELA WYNIKÓW", "ORDER OF MERIT · DOSTĘPNE DANE",
+  const playerLord = entities.some((entity) => entity.lordSide === "player" && entity.health > 0);
+  const enemyLord = entities.some((entity) => entity.lordSide === "enemy" && entity.health > 0);
+  openDialog("TABELA WYNIKÓW", "ORDER OF MERIT · SIŁA WOJSK I WŁADCY",
     '<div class="dialog-row"><span>CASTELLUM · gracz</span><b>Złoto ' + simulation.gold.toLocaleString("pl-PL") +
-    ' · Armia ' + ownArmy + ' · Popularność ' + simulation.popularity + '</b></div>' +
-    '<div class="dialog-row"><span>Banda rozbójników</span><b>Złoto — · Armia ' + enemyArmy + ' · Popularność —</b></div>' +
-    '<p class="dialog-note">Pełny ranking Lordów pojawi się wraz z systemem Lordów i ekonomią przeciwników. Obecny oddział wrogi nie jest jeszcze Lordem AI.</p>');
+    ' · Armia ' + ownArmy + ' · Popularność ' + simulation.popularity + ' · Lord ' + (playerLord ? 'ŻYJE' : 'POLEGŁ') + '</b></div>' +
+    '<div class="dialog-row"><span>WROGI LORD · NAJEŹDŹCY</span><b>Armia ' + enemyArmy + ' · Lord ' + (enemyLord ? 'ŻYJE' : 'POLEGŁ') + '</b></div>' +
+    '<p class="dialog-note">Zestawienie pokazuje bieżący stan sił i władców. Przeciwnik nie posiada jeszcze własnego skarbca, populacji ani gospodarki, więc tych wskaźników nie symulujemy.</p>');
 }
 
 function openDiplomacy(): void {
@@ -2252,6 +2474,10 @@ dialogContent.addEventListener("change", (event) => {
 
 
 function togglePause(): void {
+  if (gameOutcome !== "playing") {
+    setStatus("Rozgrywka została zakończona. Rozpocznij nową grę, aby kontynuować.");
+    return;
+  }
   paused = !paused;
   const button = document.querySelector<HTMLButtonElement>("#pause-button");
   if (button) {
@@ -2335,6 +2561,9 @@ function saveGame(): void {
       towerCounter,
       townBuildingCounter,
       stage4BuildingCounter,
+      recruitedUnitCounter,
+      fortificationCounter,
+      gameOutcome,
       camera: captureCamera(),
       cameraBookmarks: [...cameraBookmarks.entries()].map(([number, bookmark]) => [number, { ...bookmark }]),
       lastCameraBeforeJump: lastCameraBeforeJump ? { ...lastCameraBeforeJump } : null,
@@ -2377,10 +2606,19 @@ function loadGame(): void {
     "month", "speed", "monthProgress", "gold", "food", "wood", "stone", "popularity",
     "population", "housing", "unemployed", "ration", "tax", "bribeCostPerVillager", "foodTypes",
     "taverns", "beerBarrels", "churches", "cathedrals", "blessedShare", "fear",
-    "spawnProgress", "elapsedSeconds", "nextVillagerId"
+    "spawnProgress", "elapsedSeconds", "nextVillagerId", "monthlyHistory"
   ]) {
     if (savedSimulation[field] === undefined) savedSimulation[field] = defaults[field];
   }
+  const historyCandidate = Array.isArray(savedSimulation.monthlyHistory) ? savedSimulation.monthlyHistory.slice(-12) : [];
+  savedSimulation.monthlyHistory = historyCandidate.filter((entry: unknown) =>
+    isRecord(entry) && Number.isInteger(entry.month) && Number.isFinite(entry.foodConsumed) &&
+    Number.isFinite(entry.taxes) && Number.isFinite(entry.bribeCost) &&
+    Number.isFinite(entry.popularityChange) && Number.isFinite(entry.spawnedVillagers) &&
+    Number.isFinite(entry.leftVillagers) && Number.isFinite(entry.unemployed) &&
+    Number.isFinite(entry.population) && Array.isArray(entry.messages) &&
+    isRecord(entry.modifiers) && Object.values(entry.modifiers).every((value) => typeof value === "number" && Number.isFinite(value))
+  );
   const numericFields = [
     "month", "speed", "monthProgress", "gold", "food", "wood", "stone", "popularity",
     "population", "housing", "unemployed", "foodTypes", "taverns", "beerBarrels",
@@ -2422,10 +2660,11 @@ function loadGame(): void {
     return;
   }
 
-  const allowedBaseIds = new Set(["keep", "barracks", "mill", "storehouse", "stockpile", "guard", "archers", "riders", "raiders"]);
+  const allowedBaseIds = new Set(["keep", "barracks", "mill", "storehouse", "stockpile", "guard", "archers", "riders", "raiders", "lord", "enemy-lord"]);
   const savedRecords = parsed.entities.filter((entry): entry is Record<string, unknown> =>
     isRecord(entry) && typeof entry.id === "string" &&
-    (allowedBaseIds.has(entry.id) || /^watchtower-\d+$/.test(entry.id) || /^hovel-\d+$/.test(entry.id) ||
+    (allowedBaseIds.has(entry.id) || /^recruit-(archers|crossbowmen|pikemen|swordsmen)-\d+$/.test(entry.id) ||
+      /^(wall-high|wall-low|gate-small|gate-large|moat)-\d+$/.test(entry.id) || /^watchtower-\d+$/.test(entry.id) || /^hovel-\d+$/.test(entry.id) ||
       /^(chapel|church|cathedral|inn)-\d+$/.test(entry.id) || /^fear-(good|bad)-\d+$/.test(entry.id) ||
       /^(stockpile|granary|armory)-\d+$/.test(entry.id) || /^(stockpile|granary|armory)-module-\d+$/.test(entry.id) ||
       /^(woodcutter|quarry|iron-mine|pitch-worker|apple-orchard|hunter|dairy-farm|wheat-farm|mill|bakery|hop-farm|brewery|bowyer|poleturner|blacksmith|tanner|armourer|ox-tether|market)-\d+$/.test(entry.id)) &&
@@ -2435,6 +2674,11 @@ function loadGame(): void {
   );
   if (!savedRecords.some((entry) => entry.id === "stockpile")) {
     savedRecords.push({ id: "stockpile", x: 715, y: 1080, health: 100 });
+  }
+  // Version-1 saves from before the Lord system are upgraded in place.
+  if (parsed.gameOutcome === undefined) {
+    if (!savedRecords.some((entry) => entry.id === "lord")) savedRecords.push({ id: "lord", x: 1240, y: 890, health: 100 });
+    if (!savedRecords.some((entry) => entry.id === "enemy-lord")) savedRecords.push({ id: "enemy-lord", x: 2310, y: 930, health: 100 });
   }
   if (savedRecords.length === 0 || savedRecords.length > 200) {
     closeDialog(); setStatus("Zapis nie zawiera prawidłowych obiektów rozgrywki.");
@@ -2475,6 +2719,8 @@ function loadGame(): void {
     closeDialog(); setStatus("Zapis zawiera nieprawidłowe obiekty strachu."); return;
   }
 
+  // The save has passed all validation; only now discard transient combat shots.
+  clearCombatProjectiles();
   // Detach GPU batches before disposing the previous world containers.
   effulgence.setLayers(null);
   // Recreate the deterministic world, then apply the saved state to its entities.
@@ -2503,12 +2749,42 @@ function loadGame(): void {
   towerCounter = 0;
   townBuildingCounter = 0;
   stage4BuildingCounter = 0;
+  recruitedUnitCounter = 0;
+  fortificationCounter = 0;
 
   const baseById = new Map(freshWorld.entities.map((entity) => [entity.id, entity]));
   const restoredEntities: GameEntity[] = [];
   for (const record of savedRecords) {
     const id = String(record.id);
     let entity = baseById.get(id);
+    const recruitedMatch = id.match(/^recruit-(archers|crossbowmen|pikemen|swordsmen)-(\d+)$/);
+    if (!entity && recruitedMatch) {
+      entity = createCombatSquad(
+        freshWorld.layers.actors,
+        id,
+        recruitedMatch[1]!,
+        typeof record.count === "number" && Number.isFinite(record.count) ? Math.max(1, Math.min(200, Math.trunc(record.count))) : 1,
+        Number(record.x),
+        Number(record.y),
+        "player"
+      );
+      recruitedUnitCounter = Math.max(recruitedUnitCounter, Number(recruitedMatch[2]));
+    }
+    const fortificationMatch = id.match(/^(wall-high|wall-low|gate-small|gate-large|moat)-(\d+)$/);
+    if (!entity && fortificationMatch) {
+      const col = typeof record.gridCol === "number" ? Math.trunc(record.gridCol) : worldToCell(freshWorld.grid, { x: Number(record.x), y: Number(record.y) })?.col;
+      const row = typeof record.gridRow === "number" ? Math.trunc(record.gridRow) : worldToCell(freshWorld.grid, { x: Number(record.x), y: Number(record.y) })?.row;
+      if (col !== undefined && row !== undefined) {
+        entity = createFortification(
+          freshWorld.layers.structures, freshWorld.grid, id,
+          fortificationMatch[1] as FortificationKind, col, row
+        ) ?? undefined;
+        if (entity && typeof record.gateOpen === "boolean" && (entity.fortificationKind === "gate-small" || entity.fortificationKind === "gate-large")) {
+          setFortificationGate(freshWorld.grid, entity, record.gateOpen);
+        }
+        fortificationCounter = Math.max(fortificationCounter, Number(fortificationMatch[2]));
+      }
+    }
     if (!entity && id.startsWith("watchtower-")) {
       const suffix = Number(id.slice("watchtower-".length));
       entity = createWatchtower(freshWorld.layers.structures, Number(record.x), Number(record.y), suffix);
@@ -2552,6 +2828,11 @@ function loadGame(): void {
     entity.stance = record.stance === "stand-ground" || record.stance === "defensive" || record.stance === "aggressive"
       ? record.stance : undefined;
     entity.stanceReturnTarget = safeSavedPoint(record.stanceReturnTarget);
+    if (record.lordSide === "player" || record.lordSide === "enemy") entity.lordSide = record.lordSide;
+    if (entity.fortificationKind && typeof record.gateOpen === "boolean" &&
+        (entity.fortificationKind === "gate-small" || entity.fortificationKind === "gate-large")) {
+      setFortificationGate(freshWorld.grid, entity, record.gateOpen);
+    }
     restoredEntities.push(entity);
   }
 
@@ -2588,6 +2869,9 @@ function loadGame(): void {
   towerCounter = Math.max(towerCounter, typeof parsed.towerCounter === "number" ? parsed.towerCounter : 0);
   townBuildingCounter = Math.max(townBuildingCounter, typeof parsed.townBuildingCounter === "number" ? parsed.townBuildingCounter : 0);
   stage4BuildingCounter = Math.max(stage4BuildingCounter, typeof parsed.stage4BuildingCounter === "number" ? parsed.stage4BuildingCounter : 0);
+  recruitedUnitCounter = Math.max(recruitedUnitCounter, typeof parsed.recruitedUnitCounter === "number" && Number.isFinite(parsed.recruitedUnitCounter) ? parsed.recruitedUnitCounter : 0);
+  fortificationCounter = Math.max(fortificationCounter, typeof parsed.fortificationCounter === "number" && Number.isFinite(parsed.fortificationCounter) ? parsed.fortificationCounter : 0);
+  gameOutcome = parsed.gameOutcome === "victory" || parsed.gameOutcome === "defeat" || parsed.gameOutcome === "draw" ? parsed.gameOutcome : "playing";
 
   if (Array.isArray(parsed.placedStructures)) {
     for (const entry of parsed.placedStructures) {
@@ -2637,7 +2921,7 @@ function loadGame(): void {
   hudVisible = parsed.hudVisible;
   hud.hidden = !hudVisible;
   hudReveal.hidden = hudVisible;
-  paused = false;
+  paused = gameOutcome !== "playing";
   const pauseButton = document.querySelector<HTMLButtonElement>("#pause-button");
   if (pauseButton) {
     pauseButton.innerHTML = "<span>Ⅱ</span><small>PAUZA</small>";
@@ -2802,6 +3086,18 @@ function findTarget(id: string | undefined): GameEntity | undefined {
 
 function moveUnit(unit: GameEntity, deltaSeconds: number): void {
   if (!unit.moveTarget) return;
+  // A wall or closed gate may be built across an already queued route.
+  // Never continue walking through a tile that became impassable later.
+  if (!isWalkableAtWorld(world.grid, unit.moveTarget)) {
+    const destination = unit.movementQueue?.at(-1) ?? unit.attackMoveTarget ?? unit.moveTarget;
+    if (!setGridRoute(unit, destination)) {
+      unit.moveTarget = undefined;
+      unit.movementQueue = [];
+      unit.attackMoveTarget = undefined;
+      unit.attackTargetId = undefined;
+    }
+    return;
+  }
   const dx = unit.moveTarget.x - unit.x;
   const dy = unit.moveTarget.y - unit.y;
   const distance = Math.hypot(dx, dy);
@@ -2832,8 +3128,80 @@ function setGridRoute(unit: GameEntity, destination: { x: number; y: number }): 
   return true;
 }
 
+
+function clearCombatProjectiles(): void {
+  for (const projectile of combatProjectiles) projectile.glyph.destroy({ children: true });
+  combatProjectiles.length = 0;
+}
+
+function launchRangedProjectile(unit: GameEntity, target: GameEntity, damage: number): void {
+  const distance = Math.hypot(target.x - unit.x, target.y - unit.y);
+  const crossbow = unit.unitClass === "crossbowmen";
+  const glyph = addGlyph(world.layers.effects, {
+    char: crossbow ? "➶" : "›",
+    x: unit.x,
+    y: unit.y,
+    size: crossbow ? 19 : 16,
+    color: unit.team === "enemy" ? "#f07869" : crossbow ? "#e4c27a" : "#a5d6f1",
+    alpha: 1,
+    weight: "bold",
+    material: "vfx",
+    emissive: 0.35,
+    emissiveColor: unit.team === "enemy" ? "#f07869" : "#d8eefa"
+  });
+  glyph.rotation = Math.atan2(target.y - unit.y, target.x - unit.x);
+  combatProjectiles.push({
+    targetId: target.id,
+    start: { x: unit.x, y: unit.y },
+    elapsed: 0,
+    duration: projectileDuration(distance, crossbow ? 520 : 680),
+    damage,
+    glyph
+  });
+}
+
+function advanceCombatProjectiles(deltaSeconds: number, defeated: GameEntity[]): void {
+  for (let index = combatProjectiles.length - 1; index >= 0; index -= 1) {
+    const projectile = combatProjectiles[index]!;
+    const target = findTarget(projectile.targetId);
+    if (!target) {
+      projectile.glyph.destroy({ children: true });
+      combatProjectiles.splice(index, 1);
+      continue;
+    }
+    const progress = advanceProjectile(projectile, deltaSeconds);
+    const point = projectilePointAt(projectile.start, target, progress);
+    projectile.glyph.position.set(point.x, point.y);
+    projectile.glyph.rotation = Math.atan2(target.y - point.y, target.x - point.x);
+    if (progress < 1) continue;
+    target.health -= projectile.damage;
+    if (target.health <= 0) defeated.push(target);
+    projectile.glyph.destroy({ children: true });
+    combatProjectiles.splice(index, 1);
+  }
+}
+
 function updateCombat(deltaSeconds: number): void {
   const defeated: GameEntity[] = [];
+  // Watchtowers automatically defend nearby friendly territory. Fortification
+  // and terrain cells participate in the same path/line-of-sight grid.
+  for (const tower of entities) {
+    if (!tower.id.startsWith("watchtower-") || tower.health <= 0) continue;
+    tower.attackCooldown = Math.max(0, (tower.attackCooldown ?? 0) - deltaSeconds);
+    if (tower.attackCooldown > 0) continue;
+    const target = entities
+      .filter((candidate) => candidate.team === "enemy" && candidate.health > 0)
+      .map((candidate) => ({ candidate, distance: Math.hypot(candidate.x - tower.x, candidate.y - tower.y) }))
+      .filter((entry) => entry.distance <= 280 && findGridPath(world.grid, tower, entry.candidate) !== null)
+      .sort((left, right) => left.distance - right.distance)[0]?.candidate;
+    if (!target) continue;
+    target.health -= 12;
+    tower.attackCooldown = 1.2;
+    if (target.health <= 0) defeated.push(target);
+  }
+
+  advanceCombatProjectiles(deltaSeconds, defeated);
+
   for (const unit of entities) {
     if (unit.kind !== "unit") continue;
     const standGround = unit.stance === "stand-ground" || unit.holdPosition === true;
@@ -2901,14 +3269,21 @@ function updateCombat(deltaSeconds: number): void {
       unit.attackCooldown = Math.max(0, (unit.attackCooldown ?? 0) - deltaSeconds);
       if (unit.attackCooldown === 0) {
         const fearDamage = unit.team === "player" ? getFearDamageMultiplier(simulation.fear) : 1;
-        target.health -= (unit.attackDamage ?? 9) * fearDamage;
-        unit.attackCooldown = 0.85;
-        if (target.health <= 0) defeated.push(target);
+        const damage = (unit.attackDamage ?? 9) * fearDamage;
+        if (unit.unitClass === "archers" || unit.unitClass === "crossbowmen") {
+          launchRangedProjectile(unit, target, damage);
+          unit.attackCooldown = unit.unitClass === "crossbowmen" ? 1.15 : 0.92;
+        } else {
+          target.health -= damage;
+          unit.attackCooldown = 0.85;
+          if (target.health <= 0) defeated.push(target);
+        }
       }
     }
   }
 
   for (const entity of new Set(defeated)) {
+    if (entity.fortificationKind) removeFortificationFromTile(world.grid, entity);
     const index = entities.findIndex((candidate) => candidate.id === entity.id);
     if (index >= 0) entities.splice(index, 1);
     selectedIds.delete(entity.id);
@@ -2916,6 +3291,29 @@ function updateCombat(deltaSeconds: number): void {
     setStatus(entity.name + " został zniszczony.");
   }
   if (defeated.length > 0) updateSelection();
+
+  const nextOutcome = resolveLordOutcome(
+    entities.some((candidate) => candidate.lordSide === "player" && candidate.health > 0),
+    entities.some((candidate) => candidate.lordSide === "enemy" && candidate.health > 0)
+  );
+  if (gameOutcome === "playing" && nextOutcome !== "playing") {
+    gameOutcome = nextOutcome;
+    paused = true;
+    const pauseButton = document.querySelector<HTMLButtonElement>("#pause-button");
+    if (pauseButton) {
+      pauseButton.innerHTML = "<span>Ⅱ</span><small>KONIEC</small>";
+      pauseButton.classList.add("paused");
+    }
+    const headings: Record<Exclude<GameOutcome, "playing">, { title: string; kicker: string; message: string }> = {
+      victory: { title: "ZWYCIĘSTWO", kicker: "LORD PRZECIWNIKA POKONANY", message: "Twierdza przeciwnika upadła. Lord Castellum żyje, a dolina pozostaje pod Twoją kontrolą." },
+      defeat: { title: "PORAŻKA", kicker: "LORD CASTELLUM POLEGŁ", message: "Władca nie żyje. Rozgrywka została zakończona." },
+      draw: { title: "REMIS", kicker: "OBAJ LORDOWIE POLEGLI", message: "Obaj władcy zginęli w tym samym starciu. Rozgrywka została zakończona." }
+    };
+    const result = headings[gameOutcome];
+    openDialog(result.title, result.kicker, '<p>' + result.message + '</p><p class="dialog-note">Zapisz stan końcowy przez menu opcji. Wczytanie starszego zapisu przywraca jego stan rozgrywki.</p>');
+    setStatus(result.title + ". Symulacja została zatrzymana.");
+    updateSelection();
+  }
 }
 
 function panCamera(deltaSeconds: number): void {

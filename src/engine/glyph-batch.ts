@@ -48,7 +48,8 @@ const MATERIAL_IDS: Record<GlyphMaterialKind, number> = {
   unit: 2,
   selection: 3,
   vfx: 3,
-  utility: 0
+  utility: 0,
+  overview: 4
 };
 
 const QUAD_VERTEX = new Float32Array([
@@ -225,10 +226,13 @@ function createAtlas(): AtlasData {
 
 const MICRO_GLYPH_ALIASES: Record<string, string> = {
   "♞": "m", "♟": "█", "♙": "█", "⚑": "!", "♨": "*",
+  "♜": "R", "⚔": "X", "✣": "+", "▤": "#", "▥": "#", "⚒": "T",
+  "†": "+", "⚖": "=", "♧": "Y", "◆": "@", "◉": "@", "⌂": "^", "✝": "+", "✿": "*",
+  "♣": "Y", "≈": "~", "▲": "^", "﹏": "=", "❧": "Y",
   "◌": "o", "◔": "o", "◈": "o", "◇": "o", "◩": "#",
   "╔": "+", "╗": "+", "╚": "+", "╝": "+", "╬": "+", "╧": "+",
   "━": "=", "═": "=", "─": "-", "╱": "/", "╲": "\\",
-  "▤": "#", "▥": "#", "▧": "#", "⌂": "A", "⌜": "+",
+  "▧": "#", "⌜": "+",
   "Ł": "L", "Ą": "A", "Ę": "E", "Ó": "O", "Ś": "S", "Ć": "C", "Ż": "Z", "Ź": "Z", "Ń": "N",
   "ł": "l", "ą": "a", "ę": "e", "ó": "o", "ś": "s", "ć": "c", "ż": "z", "ź": "z", "ń": "n"
 };
@@ -423,7 +427,8 @@ function instanceValues(
         record.minScreenCells,
         atlas.view.cellWidth,
         atlas.view.cellHeight,
-        atlas.view.pixelRatio
+        atlas.view.pixelRatio,
+        atlas.view.zoom
       )
     : [0, 0] as const;
   const width = Math.max(rawWidth, minimum[0]);

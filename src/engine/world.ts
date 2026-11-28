@@ -827,5 +827,3 @@ export function createProductionBuilding(
   group.position.set(x, y);
   return entity(group, `${type}-${index}`, visual.name, "building", "Pracownicy wykonują cykl produkcyjny i pieszo dostarczają towary do właściwego magazynu.", visual.role, x, y, 100);
 }
-
-[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

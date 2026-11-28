@@ -136,5 +136,3 @@ export function drawTeutonicAsset(
 }
 
 export const TEUTONIC_PALETTE = C;
-
-[executed on device: vps-d5543227 (f98401a2-4f25-449c-a7ff-f53738afd282)]

@@ -133,8 +133,16 @@ test("oddziały zawierają trzy poziomy detalu i znaczniki taktyczne [xN]", asyn
   assert.ok(world.includes('lod: "strategic"'));
   assert.ok(world.includes('char: "[x" + count + "]"'));
   assert.ok(world.includes('const tacticalGlyph = variant === 1 ? ")" : variant === 2 ? "m" : variant === 3 ? "*" : "█";'));
-  assert.ok(batch.includes("record.lod && record.lod !== profile.lodTier"));
+  assert.ok(world.includes("minScreenCells: [1, 2]"));
+  assert.ok(world.includes("minScreenCells: [1, 1]"));
+  assert.ok(world.includes('setGlyphTreeLod(group, ["standard", "close"])'));
+  assert.ok(world.includes('lod: "strategic"'));
+  const main = await readSource("../src/main.ts");
+  assert.ok(main.includes("unitPickRadiusWorld(zoom, densityCellHeight)"));
+  assert.ok(main.includes("minScreenCells: [1, 2]"));
+  assert.ok(batch.includes("allowedTiers.includes(profile.lodTier)"));
   assert.ok(batch.includes("profile.unitScale"));
+  assert.ok(batch.includes("screenSpaceGlyphMinimum"));
   assert.ok(batch.includes("microGlyphActiveSize(atlas.view.density)"));
   assert.match(batch, /setView\(zoom: number, pixelRatio: number, cellWidth: number, cellHeight: number, density: GlyphDensity\)/);
 });

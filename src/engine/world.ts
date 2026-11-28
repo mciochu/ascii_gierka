@@ -1,5 +1,5 @@
 import { Container } from "pixi.js";
-import { addGlyph, addWord, type GlyphDisplay } from "./glyph";
+import { addGlyph, addWord, GlyphDisplay, type GlyphLodSet } from "./glyph";
 import { HUNTING_NODES, type ProductionType, type StorageType } from "./logistics";
 import { createWorldGrid, GRID_PIVOT, worldPositionForCell, type WorldGrid } from "./grid";
 
@@ -466,11 +466,13 @@ function makeUnit(parent: Container, x: number, y: number, variant: number, coun
   });
   addGlyph(group, {
     char: tacticalGlyph, x: 0, y: 0, size: 24, color, weight: "bold",
-    alpha: 0.98, material: "unit", height: 0.24, lod: "strategic"
+    alpha: 0.98, material: "unit", height: 0.24, lod: "strategic",
+    minScreenCells: [1, 2]
   });
   addGlyph(group, {
     char: "[x" + count + "]", x: 18, y: -17, size: 14, color, weight: "bold",
-    alpha: 0.98, material: "unit", height: 0.24, lod: "strategic"
+    alpha: 0.98, material: "unit", height: 0.24, lod: "strategic",
+    minScreenCells: [1, 1]
   });
   addGlyph(group, {
     char: "⚑", x: 0, y: -27, size: 16,
@@ -479,6 +481,31 @@ function makeUnit(parent: Container, x: number, y: number, variant: number, coun
   });
   group.position.set(x, y);
   return group;
+}
+
+function setGlyphTreeLod(node: Container, lod: GlyphLodSet): void {
+  for (const child of node.children) {
+    if (child instanceof GlyphDisplay) child.setLod(lod);
+    else if (child instanceof Container) setGlyphTreeLod(child, lod);
+  }
+}
+
+function strategicBuildingGlyph(id: string): { char: string; color: string } {
+  if (id === "keep") return { char: "K", color: "#e5c987" };
+  if (id === "barracks") return { char: "B", color: "#b9d1e5" };
+  if (id === "mill") return { char: "M", color: "#d7bd85" };
+  if (id === "storehouse" || id.startsWith("granary")) return { char: "S", color: "#cdbb8b" };
+  if (id.startsWith("stockpile")) return { char: "▣", color: "#b9c9cf" };
+  if (id.startsWith("armory")) return { char: "A", color: "#c6a9a0" };
+  if (id.startsWith("watchtower")) return { char: "T", color: "#b9d1e5" };
+  if (id.startsWith("market")) return { char: "$", color: "#e5c987" };
+  if (id.startsWith("quarry")) return { char: "Q", color: "#b8b8b0" };
+  if (id.startsWith("woodcutter") || id.startsWith("hunter")) return { char: "W", color: "#8fc58c" };
+  if (id.startsWith("iron-mine")) return { char: "I", color: "#aebac7" };
+  if (id.startsWith("pitch")) return { char: "P", color: "#b6a2c9" };
+  if (id.startsWith("hovel")) return { char: "H", color: "#cda77f" };
+  if (id.startsWith("chapel") || id.startsWith("church") || id.startsWith("cathedral")) return { char: "†", color: "#e3d6b1" };
+  return { char: "#", color: "#c5c6c1" };
 }
 
 function entity(
@@ -496,6 +523,18 @@ function entity(
   unitClass?: string
 ): GameEntity {
   group.label = id;
+  if (kind === "building") {
+    // Existing architecture remains the shared standard/close silhouette;
+    // a single representative mark replaces its detail at strategic zoom.
+    setGlyphTreeLod(group, ["standard", "close"]);
+    const marker = strategicBuildingGlyph(id);
+    addGlyph(group, {
+      char: marker.char, x: 0, y: -52, size: 38,
+      color: marker.color, weight: "bold", alpha: 0.98,
+      material: "building", height: 0.62, lod: "strategic",
+      minScreenCells: [1, 1], entityId: "strategic-building:" + id
+    });
+  }
   return {
     group, id, name, kind, description, role, x, y, health, maxHealth: 100, count, team, unitClass,
     moveSpeed: unitClass === "cavalry" ? 142 : unitClass === "archers" ? 82 : 94,

@@ -2,6 +2,7 @@ import { Container } from "pixi.js";
 
 export type GlyphMaterialKind = "terrain" | "building" | "unit" | "selection" | "vfx" | "utility";
 export type GlyphLod = "close" | "standard" | "strategic";
+export type GlyphLodSet = GlyphLod | readonly GlyphLod[];
 
 export interface GlyphSpec {
   char: string;
@@ -21,8 +22,9 @@ export interface GlyphSpec {
   animated?: boolean;
   normal?: readonly [number, number, number];
   entityId?: string | number;
-  lod?: GlyphLod;
+  lod?: GlyphLodSet;
   strategicGlyph?: string;
+  minScreenCells?: readonly [number, number];
 }
 
 export interface GlyphInstanceRecord {
@@ -41,8 +43,9 @@ export interface GlyphInstanceRecord {
   material: GlyphMaterialKind | null;
   entityId: string | number | null;
   normal: readonly [number, number, number];
-  lod?: GlyphLod;
+  lod?: GlyphLodSet;
   strategicGlyph?: string;
+  minScreenCells?: readonly [number, number];
 }
 
 /**
@@ -66,8 +69,9 @@ export class GlyphDisplay extends Container {
   private readonly animated: boolean;
   private readonly normal: readonly [number, number, number];
   private readonly explicitEntityId: string | number | null;
-  private readonly lod?: GlyphLod;
+  private lod?: GlyphLodSet;
   private readonly strategicGlyph?: string;
+  private readonly minScreenCells?: readonly [number, number];
   private _records: GlyphInstanceRecord[] = [];
   readonly style: { fill: string };
 
@@ -87,6 +91,7 @@ export class GlyphDisplay extends Container {
     this.explicitEntityId = spec.entityId ?? null;
     this.lod = spec.lod;
     this.strategicGlyph = spec.strategicGlyph;
+    this.minScreenCells = spec.minScreenCells;
 
     const self = this;
     this.style = Object.defineProperty({}, "fill", {
@@ -138,6 +143,11 @@ export class GlyphDisplay extends Container {
     this.rebuildRecords();
   }
 
+  setLod(lod: GlyphLodSet | undefined): void {
+    this.lod = lod;
+    this.rebuildRecords();
+  }
+
   private rebuildRecords(): void {
     const characters = splitGlyphText(this._text);
     const advance = glyphAdvance(this.fontSize);
@@ -159,7 +169,8 @@ export class GlyphDisplay extends Container {
       entityId: this.explicitEntityId,
       normal: this.normal,
       ...(this.lod ? { lod: this.lod } : {}),
-      ...(this.strategicGlyph ? { strategicGlyph: this.strategicGlyph } : {})
+      ...(this.strategicGlyph ? { strategicGlyph: this.strategicGlyph } : {}),
+      ...(this.minScreenCells ? { minScreenCells: this.minScreenCells } : {})
     }));
   }
 }

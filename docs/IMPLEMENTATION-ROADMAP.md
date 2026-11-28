@@ -351,3 +351,11 @@ Ta faza wdraża pięć mechanizmów z dokumentu Wklejony tekst(20261128-000418).
 - Produkcyjny vite build — PASS.
 - git diff --check — PASS.
 - Nie wykonano testu wizualnego GPU ani pomiaru 60 FPS; serwerowy Chromium nadal nie uruchamia się z powodu brakującej biblioteki libatk-1.0.so.0. Testy statyczne potwierdzają strukturę i logikę shaderów, ale nie zastępują kontroli obrazu na rzeczywistym GPU.
+
+### Uzupełnienie fazy 4 — minimalna geometria ekranowa i LOD budynków (2026-11-28)
+
+- Rekord glifu może określić minScreenCells. GPU batch przelicza tę wartość na logiczne piksele ekranu z uwzględnieniem rozdzielczości renderera, a następnie ogranicza rozmiar instancji po transformacji kamery. Nie skaluje całej warstwy ani murów.
+- Taktyczny znak jednostki ma minimum 1×2 komórki, a licznik [xN] 1×1. Ruchome postacie/cywile również zachowują minimum 1×2, niezależnie od bazowego rozmiaru fontu.
+- Promień trafienia jednostki jest wyliczany w świecie jako ekranowe 14 px podzielone przez zoom. Zasięg kliknięcia pozostaje więc stały na ekranie przy 0.5×, 1.0× i 2.0×; rozmiar modelu i klikalność nie są już zależne wyłącznie od skali świata.
+- Budynki zachowują istniejącą sylwetkę w trybie standard i close. Przy zoomie strategicznym ich detale są zastępowane pojedynczym glifem rozpoznawczym (m.in. K — donżon, B — koszary, M — młyn, S — spichlerz, T — wieża, litery obiektów gospodarczych).
+- Weryfikacja uzupełnienia: testy konwersji fizycznych komórek na logiczne piksele HiDPI, niezmiennego ekranowego hitboxu dla trzech poziomów zoomu, trzech LOD jednostek i LOD budowli.

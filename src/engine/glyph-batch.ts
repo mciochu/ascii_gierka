@@ -17,6 +17,7 @@ import {
   getZoomProfile,
   microGlyphActiveSize,
   rasterizeMicroGlyph,
+  screenSpaceGlyphMinimum,
   type GlyphDensity
 } from "./effulgence";
 import {
@@ -393,7 +394,10 @@ function instanceValues(
   const entityId = hashEntityId(record.entityId ?? entityLabel);
   const [red, green, blue] = colorChannels(record.color);
   const profile = getZoomProfile(atlas.view.zoom);
-  if (record.lod && record.lod !== profile.lodTier) return offset;
+  if (record.lod) {
+    const allowedTiers = Array.isArray(record.lod) ? record.lod : [record.lod];
+    if (!allowedTiers.includes(profile.lodTier)) return offset;
+  }
   const character = profile.lodTier === "strategic" && record.strategicGlyph
     ? record.strategicGlyph : record.character;
   const slot = atlasSlot(atlas, character, record.weight);
@@ -412,8 +416,18 @@ function instanceValues(
   const baseX = transform.x + record.offsetX * transform.scaleX * cosine - record.offsetY * transform.scaleY * sine;
   const baseY = transform.y + record.offsetX * transform.scaleX * sine + record.offsetY * transform.scaleY * cosine;
   const unitBoost = material === "unit" ? profile.unitScale : 1;
-  const width = record.size * 0.80 * transform.scaleX * unitBoost;
-  const height = record.size * 1.15 * transform.scaleY * unitBoost;
+  const rawWidth = Math.abs(record.size * 0.80 * transform.scaleX * unitBoost);
+  const rawHeight = Math.abs(record.size * 1.15 * transform.scaleY * unitBoost);
+  const minimum = record.minScreenCells
+    ? screenSpaceGlyphMinimum(
+        record.minScreenCells,
+        atlas.view.cellWidth,
+        atlas.view.cellHeight,
+        atlas.view.pixelRatio
+      )
+    : [0, 0] as const;
+  const width = Math.max(rawWidth, minimum[0]);
+  const height = Math.max(rawHeight, minimum[1]);
   const alpha = Math.max(0, Math.min(1, transform.alpha));
   const materialLayerByte = materialId | (record.animated ? 128 : 0);
   const normal = record.normal;

@@ -10,6 +10,8 @@ import {
   MICRO_GLYPH_CELL,
   cellSizeForDensity,
   microGlyphActiveSize,
+  screenSpaceGlyphMinimum,
+  unitPickRadiusWorld,
   edgeGlyphIndexForAngle,
   getZoomProfile,
   priorityForCellSample,
@@ -115,4 +117,19 @@ test("profil zoomu zmienia teren, bloom, próg krawędzi i rozmiar oddziału", (
   assert.equal(close.bloomIntensityScale, 1);
   assert.ok(Math.abs(close.edgeThreshold - 0.24) < 1e-10);
   assert.equal(close.unitScale, 1);
+});
+
+
+test("screen-space clamp utrzymuje minimum komórek również na HiDPI", () => {
+  assert.deepEqual(screenSpaceGlyphMinimum([1, 2], 10, 14, 2), [5, 14]);
+  assert.deepEqual(screenSpaceGlyphMinimum([1, 1], 12, 16, 2), [6, 8]);
+  assert.deepEqual(screenSpaceGlyphMinimum([1, 2], 5, 7, 1), [5, 14]);
+});
+
+test("promień klikalności oddziału pozostaje stały w pikselach przy zoomie 0.5×, 1× i 2×", () => {
+  for (const zoom of [0.5, 1, 2]) {
+    const worldRadius = unitPickRadiusWorld(zoom, 7);
+    assert.ok(Math.abs(worldRadius * zoom - 14) < 1e-10);
+  }
+  assert.equal(unitPickRadiusWorld(1, 12), 18);
 });

@@ -80,6 +80,27 @@ export function cellSizeForDensity(density: GlyphDensity): readonly [number, num
   return CELL_SIZES[density];
 }
 
+/** Minimum logical-screen dimensions for a glyph spanning N post-process cells. */
+export function screenSpaceGlyphMinimum(
+  minCells: readonly [number, number],
+  cellWidthPhysical: number,
+  cellHeightPhysical: number,
+  pixelRatio: number
+): readonly [number, number] {
+  const ratio = Number.isFinite(pixelRatio) ? Math.max(1, pixelRatio) : 1;
+  return [
+    Math.max(0, minCells[0]) * Math.max(1, cellWidthPhysical) / ratio,
+    Math.max(0, minCells[1]) * Math.max(1, cellHeightPhysical) / ratio
+  ];
+}
+
+/** World-space pick radius that stays constant in screen pixels across zoom levels. */
+export function unitPickRadiusWorld(zoom: number, glyphCellHeight: number): number {
+  const safeZoom = Number.isFinite(zoom) ? Math.max(0.5, Math.min(2.0, zoom)) : 1;
+  const screenRadius = Math.max(14, Math.max(1, glyphCellHeight) * 1.5);
+  return screenRadius / safeZoom;
+}
+
 export function getZoomProfile(zoom: number): EffulgenceZoomProfile {
   const safeZoom = Number.isFinite(zoom) ? Math.max(0.5, Math.min(2.0, zoom)) : 1.0;
   const zoomNorm = Math.max(0, Math.min(1, (safeZoom - 0.5) / (2.0 - 0.5)));

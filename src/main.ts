@@ -4,6 +4,8 @@ import {
   DEFAULT_EFFULGENCE_SETTINGS,
   EFFULGENCE_SETTINGS_KEY,
   normalizeEffulgenceSettings,
+  cellSizeForDensity,
+  unitPickRadiusWorld,
   type EffulgenceSettings
 } from "./engine/effulgence";
 import { addGlyph, type GlyphDisplay } from "./engine/glyph";
@@ -544,7 +546,8 @@ function updateVillagerVisuals(realDeltaSeconds: number): void {
         color: villager.status === "leaving" ? "#b36b62" : villager.cargo?.length ? "#e4c36e" : villager.role === "priest" ? "#e9dfbc" : "#8bd18a",
         alpha: 0.96, stroke: "#10140f", strokeWidth: 1,
         material: "unit", height: 0.24, entityId: villager.id,
-        strategicGlyph: villager.role === "priest" ? "†" : "*"
+        strategicGlyph: villager.role === "priest" ? "†" : "*",
+        minScreenCells: [1, 2]
       });
       villagerViews.set(villager.id, glyph);
     }
@@ -978,10 +981,12 @@ function screenToWorld(screenX: number, screenY: number): { x: number; y: number
 function findEntityAt(x: number, y: number): GameEntity | null {
   let nearest: GameEntity | null = null;
   let nearestDistance = Infinity;
+  const densityCellHeight = cellSizeForDensity(effulgence.getSettings().density)[1];
+  const unitRadius = unitPickRadiusWorld(zoom, densityCellHeight);
   for (const entity of entities) {
     if (entity.health <= 0) continue;
     const distance = Math.hypot(entity.x - x, entity.y - y);
-    const radius = entity.kind === "building" ? 76 : 43;
+    const radius = entity.kind === "building" ? 76 : unitRadius;
     if (distance <= radius && distance < nearestDistance) {
       nearest = entity;
       nearestDistance = distance;
